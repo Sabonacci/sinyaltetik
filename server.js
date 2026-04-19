@@ -203,6 +203,10 @@ async function kontrolEt() {
 // ── Sunucu ────────────────────────────────────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Sinyal botu çalışıyor ✅'))
+app.get('/test', async (req, res) => {
+  await sendTelegram('🧪 <b>Test mesajı</b>\nBot çalışıyor ✅')
+  res.send('Telegram mesajı gönderildi')
+})
 
 app.listen(3000, () => {
   console.log('Sunucu başladı')
