@@ -1,6 +1,8 @@
 const axios = require('axios')
+const express = require('express')
+const app = express()
 
-const TELEGRAM_TOKEN   = '8557325295:AAFP9PB5GdKWdUZfuizwnZlo7_tgjRpI07g'
+const TELEGRAM_TOKEN   = 'BURAYA_BOT_TOKENINI_YAZ'
 const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
@@ -8,14 +10,12 @@ const HISSELER = [
   'GESAN.IS','EUPWR.IS','YEOTK.IS','ARTMS.IS','PCILT.IS'
 ]
 
-// Her hisse için durum hafızası
 const durum = {}
 HISSELER.forEach(h => {
   durum[h] = {
     lastSignal: 0,
     alBar:      null,
-    alPrice:    null,
-    prices:     []   // kapanış fiyatları geçmişi
+    alPrice:    null
   }
 })
 
@@ -23,7 +23,7 @@ HISSELER.forEach(h => {
 
 function wma(arr, len) {
   if (arr.length < len) return null
-  const slice  = arr.slice(-len)
+  const slice = arr.slice(-len)
   let num = 0, den = 0
   for (let i = 0; i < len; i++) {
     num += slice[i] * (i + 1)
@@ -32,23 +32,12 @@ function wma(arr, len) {
   return num / den
 }
 
-function ema(arr, len) {
-  if (arr.length === 0) return null
-  const k = 2 / (len + 1)
-  let val = arr[0]
-  for (let i = 1; i < arr.length; i++) {
-    val = arr[i] * k + val * (1 - k)
-  }
-  return val
-}
-
 function emaArr(arr, len) {
-  // Her bar için EMA dizisi döndürür
   if (arr.length === 0) return []
   const k = 2 / (len + 1)
   const result = [arr[0]]
   for (let i = 1; i < arr.length; i++) {
-    result.push(arr[i] * k + result[i-1] * (1 - k))
+    result.push(arr[i] * k + result[i - 1] * (1 - k))
   }
   return result
 }
@@ -59,7 +48,6 @@ function calcMAVW(closes, fmal, smal) {
   const Ftmal = tmal + Fmal
   const Smal  = Fmal + Ftmal
 
-  let m = closes
   const wmaStep = (arr, len) => {
     const out = []
     for (let i = 0; i < arr.length; i++) {
@@ -70,6 +58,7 @@ function calcMAVW(closes, fmal, smal) {
     return out
   }
 
+  let m = closes
   m = wmaStep(m, fmal)
   m = wmaStep(m, smal)
   m = wmaStep(m, tmal)
@@ -85,9 +74,6 @@ function calcT3(closes, period, b) {
   const c3 = -6*b*b - 3*b - 3*b*b*b
   const c4 =  1 + 3*b + b*b*b + 3*b*b
 
-  let e = closes
-  for (let i = 0; i < 6; i++) e = emaArr(e, period)
-
   const e1 = emaArr(closes, period)
   const e2 = emaArr(e1, period)
   const e3 = emaArr(e2, period)
@@ -100,17 +86,16 @@ function calcT3(closes, period, b) {
   )
 }
 
-// ── Yahoo Finance'den veri çek ────────────────────────────────────────────────
+// ── Yahoo Finance veri çek ────────────────────────────────────────────────────
 
 async function fetchPrices(symbol) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=5d`
     const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
     const closes = res.data.chart.result[0].indicators.quote[0].close
-    // null değerleri temizle
     return closes.filter(c => c !== null && c !== undefined)
   } catch (err) {
-    console.error(`${symbol} veri hatası:`, err.message)
+    console.error(`${symbol} veri hatası: ${err.message}`)
     return null
   }
 }
@@ -132,37 +117,38 @@ async function sendTelegram(msg) {
 // ── Ana sinyal motoru ─────────────────────────────────────────────────────────
 
 async function kontrolEt() {
-  console.log(`${sembol} | T3: ${t3Son.toFixed(2)} | MAVW: ${mavwSon.toFixed(2)} | Fiyat: ${closeSon.toFixed(2)} | mavwKirmizi: ${mavwKirmizi} | t3K2Y: ${t3K2Y}`)
+  console.log(`[${new Date().toLocaleTimeString('tr-TR')}] Kontrol başladı...`)
 
   for (const sembol of HISSELER) {
     const closes = await fetchPrices(sembol)
-    if (!closes || closes.length < 50) continue
+    if (!closes || closes.length < 50) {
+      console.log(`${sembol} | Yetersiz veri: ${closes ? closes.length : 0} bar`)
+      continue
+    }
 
-    const d     = durum[sembol]
-    const mavw  = calcMAVW(closes, 3, 5)
-    const t3    = calcT3(closes, 7, 0.7)
-    const n     = closes.length - 1
+    const d      = durum[sembol]
+    const mavw   = calcMAVW(closes, 3, 5)
+    const t3     = calcT3(closes, 7, 0.7)
+    const n      = closes.length - 1
 
-    // Son 3 değer
-    const t3Son    = t3[n],    t3Prev  = t3[n-1],  t3Prev2 = t3[n-2]
-    const mavwSon  = mavw[n],  mavwPrev = mavw[n-1]
+    const t3Son    = t3[n]
+    const t3Prev   = t3[n - 1]
+    const t3Prev2  = t3[n - 2]
+    const mavwSon  = mavw[n]
+    const mavwPrev = mavw[n - 1]
     const closeSon = closes[n]
 
-    // Renk tespiti
-    const mavwKirmizi = mavwSon  < mavwPrev
-    const t3K2Y = t3Son > t3Prev && t3Prev <= t3Prev2   // kırmızıdan yeşile
-    const t3Y2K = t3Son < t3Prev && t3Prev >= t3Prev2   // yeşilden kırmızıya
+    const mavwKirmizi = mavwSon < mavwPrev
+    const t3K2Y = t3Son > t3Prev && t3Prev <= t3Prev2
+    const t3Y2K = t3Son < t3Prev && t3Prev >= t3Prev2
 
-    // EMA'lar
     const ema5Val  = emaArr(closes, 5)[n]
     const ema7Val  = emaArr(closes, 7)[n]
     const ema10Val = emaArr(closes, 10)[n]
     const ema13Val = emaArr(closes, 13)[n]
 
-    // AL şartı
     const alSart = t3K2Y && t3Son < mavwSon && mavwKirmizi
 
-    // Periyota göre stop EMA
     let activeEma = null
     if (d.lastSignal === 1 && d.alBar !== null) {
       const barsFromAl = n - d.alBar
@@ -173,9 +159,11 @@ async function kontrolEt() {
       else                       activeEma = ema13Val
     }
 
-    // SAT şartı
     const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
-    console.log(`${sembol} | Fiyat:${closeSon.toFixed(2)} | T3:${t3Son.toFixed(2)} | MAVW:${mavwSon.toFixed(2)} | mavwK:${mavwKirmizi} | t3K2Y:${t3K2Y} | t3Y2K:${t3Y2K}`)
+
+    // DEBUG
+    console.log(`${sembol} | Fiyat:${closeSon.toFixed(2)} | T3:${t3Son.toFixed(2)} | MAVW:${mavwSon.toFixed(2)} | mavwK:${mavwKirmizi} | t3K2Y:${t3K2Y} | t3Y2K:${t3Y2K} | aktifEma:${activeEma ? activeEma.toFixed(2) : 'yok'}`)
+
     // AL sinyali
     if (alSart && d.lastSignal !== 1) {
       d.lastSignal = 1
@@ -189,14 +177,14 @@ async function kontrolEt() {
         `📊 T3: ${t3Son.toFixed(2)} | MAVW: ${mavwSon.toFixed(2)}\n` +
         `🕐 ${new Date().toLocaleTimeString('tr-TR')}`
       )
-      console.log(`AL: ${sembol} @ ${closeSon}`)
+      console.log(`✅ AL SİNYALİ: ${sembol} @ ${closeSon}`)
     }
 
     // SAT sinyali
     if (satSart && d.lastSignal !== -1) {
       const period = n - d.alBar
       const pct    = ((closeSon - d.alPrice) / d.alPrice * 100).toFixed(2)
-      const emoji  = pct >= 0 ? '📈' : '📉'
+      const emoji  = parseFloat(pct) >= 0 ? '📈' : '📉'
       const ad     = sembol.replace('.IS', '')
 
       d.lastSignal = -1
@@ -208,22 +196,19 @@ async function kontrolEt() {
         `${emoji} Kar/Zarar: %${pct}\n` +
         `🕐 ${new Date().toLocaleTimeString('tr-TR')}`
       )
-      console.log(`SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
+      console.log(`🔴 SAT SİNYALİ: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
     }
   }
 
   console.log(`[${new Date().toLocaleTimeString('tr-TR')}] Kontrol bitti.`)
 }
 
-// ── Sunucuyu başlat ───────────────────────────────────────────────────────────
-
-const express = require('express')
-const app     = express()
+// ── Sunucu ────────────────────────────────────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Sinyal botu çalışıyor ✅'))
 
 app.listen(3000, () => {
   console.log('Sunucu başladı')
-  kontrolEt() // ilk çalışma
-  setInterval(kontrolEt, 5 * 60 * 1000) // her 5 dakika
+  kontrolEt()
+  setInterval(kontrolEt, 5 * 60 * 1000)
 })
