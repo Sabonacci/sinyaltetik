@@ -1,6 +1,6 @@
 const axios = require('axios')
 
-const TELEGRAM_TOKEN   = 'BURAYA_BOT_TOKENINI_YAZ'
+const TELEGRAM_TOKEN   = '8557325295:AAFP9PB5GdKWdUZfuizwnZlo7_tgjRpI07g'
 const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
