@@ -132,7 +132,7 @@ async function sendTelegram(msg) {
 // ── Ana sinyal motoru ─────────────────────────────────────────────────────────
 
 async function kontrolEt() {
-  console.log(`[${new Date().toLocaleTimeString('tr-TR')}] Kontrol başladı...`)
+  console.log(`${sembol} | T3: ${t3Son.toFixed(2)} | MAVW: ${mavwSon.toFixed(2)} | Fiyat: ${closeSon.toFixed(2)} | mavwKirmizi: ${mavwKirmizi} | t3K2Y: ${t3K2Y}`)
 
   for (const sembol of HISSELER) {
     const closes = await fetchPrices(sembol)
