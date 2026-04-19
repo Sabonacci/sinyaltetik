@@ -5,7 +5,7 @@ const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
   'ECILC.IS','NETCD.IS','PEKGY.IS','LMKDC.IS','TRENJ.IS',
-  'GESAN.IS','EUPWR.IS','YEOTK.IS','ARTMS.IS','PCCILT.IS'
+  'GESAN.IS','EUPWR.IS','YEOTK.IS','ARTMS.IS','PCILT.IS'
 ]
 
 // Her hisse için durum hafızası
