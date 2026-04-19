@@ -175,7 +175,7 @@ async function kontrolEt() {
 
     // SAT şartı
     const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
-
+    console.log(`${sembol} | Fiyat:${closeSon.toFixed(2)} | T3:${t3Son.toFixed(2)} | MAVW:${mavwSon.toFixed(2)} | mavwK:${mavwKirmizi} | t3K2Y:${t3K2Y} | t3Y2K:${t3Y2K}`)
     // AL sinyali
     if (alSart && d.lastSignal !== 1) {
       d.lastSignal = 1
