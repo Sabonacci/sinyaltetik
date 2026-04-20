@@ -10,8 +10,13 @@ const HISSELER = [
   'GESAN.IS','EUPWR.IS','YEOTK.IS','ARTMS.IS','PCILT.IS'
 ]
 
+const COINLER = [
+  'BTCUSDT','XRPUSDT','DASHUSDT','SOLUSDT',
+  'ETHUSDT','ETHFIUSDT','POLUSDT'
+]
+
 const durum = {}
-HISSELER.forEach(h => {
+;[...HISSELER, ...COINLER].forEach(h => {
   durum[h] = {
     lastSignal: 0,
     alBar:      null,
@@ -86,14 +91,27 @@ function calcT3(closes, period, b) {
   )
 }
 
-// ── Yahoo Finance veri çek ────────────────────────────────────────────────────
+// ── Yahoo Finance veri çek (BIST) ─────────────────────────────────────────────
 
-async function fetchPrices(symbol) {
+async function fetchYahoo(symbol) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=5d`
     const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
     const closes = res.data.chart.result[0].indicators.quote[0].close
-    return closes.filter(c => c !== null && c !== undefined)
+    return closes.filter(c => c !== null && c !== undefined).map(c => parseFloat(c.toFixed(4)))
+  } catch (err) {
+    console.error(`${symbol} veri hatası: ${err.message}`)
+    return null
+  }
+}
+
+// ── Binance veri çek (Coin) ───────────────────────────────────────────────────
+
+async function fetchBinance(symbol) {
+  try {
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=200`
+    const res = await axios.get(url)
+    return res.data.map(k => parseFloat(k[4])) // kapanış fiyatı
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
     return null
@@ -114,90 +132,105 @@ async function sendTelegram(msg) {
   }
 }
 
-// ── Ana sinyal motoru ─────────────────────────────────────────────────────────
+// ── Sinyal motoru (ortak) ─────────────────────────────────────────────────────
 
-async function kontrolEt() {
-  console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol başladı...`)
-
-  for (const sembol of HISSELER) {
-    const closes = await fetchPrices(sembol)
-    if (!closes || closes.length < 50) {
-      console.log(`${sembol} | Yetersiz veri: ${closes ? closes.length : 0} bar`)
-      continue
-    }
-
-    const d      = durum[sembol]
-    const mavw   = calcMAVW(closes, 3, 5)
-    const t3     = calcT3(closes, 7, 0.7)
-    const n      = closes.length - 1
-
-    const t3Son    = t3[n]
-    const t3Prev   = t3[n - 1]
-    const t3Prev2  = t3[n - 2]
-    const mavwSon  = mavw[n]
-    const mavwPrev = mavw[n - 1]
-    const closeSon = closes[n]
-
-    const mavwKirmizi = mavwSon < mavwPrev
-    const t3K2Y = t3Son > t3Prev && t3Prev <= t3Prev2
-    const t3Y2K = t3Son < t3Prev && t3Prev >= t3Prev2
-
-    const ema5Val  = emaArr(closes, 5)[n]
-    const ema7Val  = emaArr(closes, 7)[n]
-    const ema10Val = emaArr(closes, 10)[n]
-    const ema13Val = emaArr(closes, 13)[n]
-
-    const alSart = t3K2Y && t3Son < mavwSon && mavwKirmizi
-
-    let activeEma = null
-    if (d.lastSignal === 1 && d.alBar !== null) {
-      const barsFromAl = n - d.alBar
-      if      (barsFromAl === 1) activeEma = ema5Val
-      else if (barsFromAl === 2) activeEma = ema7Val
-      else if (barsFromAl === 3) activeEma = ema7Val
-      else if (barsFromAl === 4) activeEma = ema10Val
-      else                       activeEma = ema13Val
-    }
-
-    const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
-
-    // AL sinyali
-    if (alSart && d.lastSignal !== 1) {
-      d.lastSignal = 1
-      d.alBar      = n
-      d.alPrice    = closeSon
-
-      const ad = sembol.replace('.IS', '')
-      await sendTelegram(
-        `🟢 <b>AL — ${ad}</b>\n` +
-        `💰 Fiyat: ${closeSon.toFixed(2)} ₺\n` +
-        `📊 T3: ${t3Son.toFixed(2)} | MAVW: ${mavwSon.toFixed(2)}\n` +
-        `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
-      )
-      console.log(`✅ AL SİNYALİ: ${sembol} @ ${closeSon}`)
-    }
-
-    // SAT sinyali
-    if (satSart && d.lastSignal !== -1) {
-      const period = n - d.alBar
-      const pct    = ((closeSon - d.alPrice) / d.alPrice * 100).toFixed(2)
-      const emoji  = parseFloat(pct) >= 0 ? '📈' : '📉'
-      const ad     = sembol.replace('.IS', '')
-
-      d.lastSignal = -1
-
-      await sendTelegram(
-        `🔴 <b>SAT — ${ad}</b>\n` +
-        `💰 Fiyat: ${closeSon.toFixed(2)} ₺\n` +
-        `⏱ Periyot: ${period} bar\n` +
-        `${emoji} Kar/Zarar: %${pct}\n` +
-        `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
-      )
-      console.log(`🔴 SAT SİNYALİ: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
-    }
+async function sinyalKontrol(sembol, closes, para) {
+  if (!closes || closes.length < 50) {
+    console.log(`${sembol} | Yetersiz veri`)
+    return
   }
 
-  console.log(`[${new Date().toLocaleTimeString('tr-TR')}] Kontrol bitti.`)
+  const d      = durum[sembol]
+  const mavw   = calcMAVW(closes, 3, 5)
+  const t3     = calcT3(closes, 7, 0.7)
+  const n      = closes.length - 1
+
+  const t3Son    = t3[n]
+  const t3Prev   = t3[n - 1]
+  const t3Prev2  = t3[n - 2]
+  const mavwSon  = mavw[n]
+  const mavwPrev = mavw[n - 1]
+  const closeSon = closes[n]
+
+  const mavwKirmizi = mavwSon < mavwPrev
+  const t3K2Y = t3Son > t3Prev && t3Prev <= t3Prev2
+  const t3Y2K = t3Son < t3Prev && t3Prev >= t3Prev2
+
+  const ema5Val  = emaArr(closes, 5)[n]
+  const ema7Val  = emaArr(closes, 7)[n]
+  const ema10Val = emaArr(closes, 10)[n]
+  const ema13Val = emaArr(closes, 13)[n]
+
+  const alSart = t3K2Y && t3Son < mavwSon && mavwKirmizi
+
+  let activeEma = null
+  if (d.lastSignal === 1 && d.alBar !== null) {
+    const barsFromAl = n - d.alBar
+    if      (barsFromAl === 1) activeEma = ema5Val
+    else if (barsFromAl === 2) activeEma = ema7Val
+    else if (barsFromAl === 3) activeEma = ema7Val
+    else if (barsFromAl === 4) activeEma = ema10Val
+    else                       activeEma = ema13Val
+  }
+
+  const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
+
+  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  const ad   = sembol.replace('.IS', '').replace('USDT', '')
+
+  // AL sinyali
+  if (alSart && d.lastSignal !== 1) {
+    d.lastSignal = 1
+    d.alBar      = n
+    d.alPrice    = closeSon
+
+    await sendTelegram(
+      `🟢 <b>AL — ${ad}</b>\n` +
+      `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
+      `📊 T3: ${t3Son.toFixed(4)} | MAVW: ${mavwSon.toFixed(4)}\n` +
+      `🕐 ${saat}`
+    )
+    console.log(`✅ AL: ${sembol} @ ${closeSon}`)
+  }
+
+  // SAT sinyali
+  if (satSart && d.lastSignal !== -1) {
+    const period = n - d.alBar
+    const pct    = ((closeSon - d.alPrice) / d.alPrice * 100).toFixed(2)
+    const emoji  = parseFloat(pct) >= 0 ? '📈' : '📉'
+
+    d.lastSignal = -1
+
+    await sendTelegram(
+      `🔴 <b>SAT — ${ad}</b>\n` +
+      `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
+      `⏱ Periyot: ${period} bar\n` +
+      `${emoji} Kar/Zarar: %${pct}\n` +
+      `🕐 ${saat}`
+    )
+    console.log(`🔴 SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
+  }
+}
+
+// ── Ana kontrol döngüsü ───────────────────────────────────────────────────────
+
+async function kontrolEt() {
+  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  console.log(`[${saat}] Kontrol başladı...`)
+
+  // BIST hisseleri
+  for (const sembol of HISSELER) {
+    const closes = await fetchYahoo(sembol)
+    await sinyalKontrol(sembol, closes, '₺')
+  }
+
+  // Coinler
+  for (const sembol of COINLER) {
+    const closes = await fetchBinance(sembol)
+    await sinyalKontrol(sembol, '$')
+  }
+
+  console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
 }
 
 // ── Sunucu ────────────────────────────────────────────────────────────────────
@@ -214,4 +247,3 @@ app.listen(3000, () => {
   kontrolEt()
   setInterval(kontrolEt, 5 * 60 * 1000)
 })
-console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
