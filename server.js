@@ -2,7 +2,7 @@ const axios = require('axios')
 const express = require('express')
 const app = express()
 
-const TELEGRAM_TOKEN   = '8557325295:AAFP9PB5GdKWdUZfuizwnZlo7_tgjRpI07g'
+const TELEGRAM_TOKEN   = '8557325295:AAE6RBw8kWIUH7L5KvaBaPcadx1pMILhs84'
 const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
