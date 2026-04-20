@@ -172,7 +172,7 @@ async function kontrolEt() {
         `🟢 <b>AL — ${ad}</b>\n` +
         `💰 Fiyat: ${closeSon.toFixed(2)} ₺\n` +
         `📊 T3: ${t3Son.toFixed(2)} | MAVW: ${mavwSon.toFixed(2)}\n` +
-        `🕐 ${new Date().toLocaleTimeString('tr-TR')}`
+        `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
       )
       console.log(`✅ AL SİNYALİ: ${sembol} @ ${closeSon}`)
     }
