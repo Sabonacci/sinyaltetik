@@ -2,7 +2,7 @@ const axios = require('axios')
 const express = require('express')
 const app = express()
 
-const TELEGRAM_TOKEN   = '8557325295:AAE6RBw8kWIUH7L5KvaBaPcadx1pMILhs84'
+const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
@@ -214,3 +214,4 @@ app.listen(3000, () => {
   kontrolEt()
   setInterval(kontrolEt, 5 * 60 * 1000)
 })
+console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
