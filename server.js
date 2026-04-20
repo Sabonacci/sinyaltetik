@@ -3,7 +3,7 @@ const express = require('express')
 const app = express()
 
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
-const TELEGRAM_CHAT_ID = '5756145019'
+const TELEGRAM_CHAT_ID = '-4635808208'
 
 const HISSELER = [
   'ECILC.IS','NETCD.IS','PEKGY.IS','LMKDC.IS','TRENJ.IS',
