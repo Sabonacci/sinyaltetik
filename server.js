@@ -1,170 +1,249 @@
-const axios = require('axios');
-const express = require('express');
-const app = express();
+const axios = require('axios')
+const express = require('express')
+const app = express()
 
-const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js';      // Kendi tokeninizle değiştirin
-const TELEGRAM_CHAT_ID = '-1003975259428';        // Kendi chat ID'nizle değiştirin
+const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
+const TELEGRAM_CHAT_ID = '-1003975259428'
 
-// Takip edilecek hisseler ve coinler
 const HISSELER = [
-  'ECILC.IS', 'SUWEN.IS', 'PEKGY.IS', 'LMKDC.IS', 'TRENJ.IS',
-  'GESAN.IS', 'EUPWR.IS', 'MAKIM.IS', 'ARENA.IS', 'PATEK.IS'
-];
+  'ECILC.IS','SUWEN.IS','PEKGY.IS','LMKDC.IS','TRENJ.IS',
+  'GESAN.IS','EUPWR.IS','MAKIM.IS','ARENA.IS','PATEK.IS'
+]
 
 const COINLER = [
-  'BTCUSDT', 'XRPUSDT', 'DASHUSDT', 'SOLUSDT',
-  'ETHUSDT', 'ETHFIUSDT', 'POLUSDT'
-];
+  'BTCUSDT','XRPUSDT','DASHUSDT','SOLUSDT',
+  'ETHUSDT','ETHFIUSDT','POLUSDT'
+]
 
-// Durum takibi: her sembol için son sinyal tipi (1: AL, -1: SAT, 0: bekliyor) ve alış fiyatı
-const durum = {};
-[...HISSELER, ...COINLER].forEach(sembol => {
-  durum[sembol] = {
-    lastSignal: 0,   // 0: sinyal yok, 1: alış pozisyonu açık, -1: satış pozisyonu açık (veya bekleme)
-    alPrice: null
-  };
-});
-
-// ------------------- YARDIMCI FONKSİYONLAR -------------------
-function emaArr(closes, period) {
-  if (!closes || closes.length === 0) return [];
-  const k = 2 / (period + 1);
-  const ema = [closes[0]];
-  for (let i = 1; i < closes.length; i++) {
-    ema.push(closes[i] * k + ema[i - 1] * (1 - k));
+const durum = {}
+;[...HISSELER, ...COINLER].forEach(h => {
+  durum[h] = {
+    lastSignal: 0,
+    alBar:      null,
+    alPrice:    null
   }
-  return ema;
+})
+
+// ── Yardımcı fonksiyonlar ─────────────────────────────────────────────────────
+
+function wma(arr, len) {
+  if (arr.length < len) return null
+  const slice = arr.slice(-len)
+  let num = 0, den = 0
+  for (let i = 0; i < len; i++) {
+    num += slice[i] * (i + 1)
+    den += (i + 1)
+  }
+  return num / den
 }
 
-// ------------------- VERİ ÇEKME -------------------
-// Yahoo Finance (BIST hisseleri) - 5 dakikalık, son 5 gün
+function emaArr(arr, len) {
+  if (arr.length === 0) return []
+  const k = 2 / (len + 1)
+  const result = [arr[0]]
+  for (let i = 1; i < arr.length; i++) {
+    result.push(arr[i] * k + result[i - 1] * (1 - k))
+  }
+  return result
+}
+
+function calcMAVW(closes, fmal, smal) {
+  const tmal  = fmal + smal
+  const Fmal  = smal + tmal
+  const Ftmal = tmal + Fmal
+  const Smal  = Fmal + Ftmal
+
+  const wmaStep = (arr, len) => {
+    const out = []
+    for (let i = 0; i < arr.length; i++) {
+      const slice = arr.slice(0, i + 1)
+      const w = wma(slice, len)
+      out.push(w !== null ? w : arr[i])
+    }
+    return out
+  }
+
+  let m = closes
+  m = wmaStep(m, fmal)
+  m = wmaStep(m, smal)
+  m = wmaStep(m, tmal)
+  m = wmaStep(m, Fmal)
+  m = wmaStep(m, Ftmal)
+  m = wmaStep(m, Smal)
+  return m
+}
+
+function calcT3(closes, period, b) {
+  const c1 = -b*b*b
+  const c2 =  3*b*b + 3*b*b*b
+  const c3 = -6*b*b - 3*b - 3*b*b*b
+  const c4 =  1 + 3*b + b*b*b + 3*b*b
+
+  const e1 = emaArr(closes, period)
+  const e2 = emaArr(e1, period)
+  const e3 = emaArr(e2, period)
+  const e4 = emaArr(e3, period)
+  const e5 = emaArr(e4, period)
+  const e6 = emaArr(e5, period)
+
+  return e6.map((_, i) =>
+    c1*e6[i] + c2*e5[i] + c3*e4[i] + c4*e3[i]
+  )
+}
+
+// ── Yahoo Finance veri çek (BIST) ─────────────────────────────────────────────
+
 async function fetchYahoo(symbol) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=5d`;
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    const closes = res.data.chart.result[0].indicators.quote[0].close;
-    return closes.filter(c => c !== null && c !== undefined).map(c => parseFloat(c.toFixed(4)));
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=5m&range=5d`
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const closes = res.data.chart.result[0].indicators.quote[0].close
+    return closes.filter(c => c !== null && c !== undefined).map(c => parseFloat(c.toFixed(4)))
   } catch (err) {
-    console.error(`${symbol} Yahoo hatası: ${err.message}`);
-    return null;
+    console.error(`${symbol} veri hatası: ${err.message}`)
+    return null
   }
 }
 
-// Binance (coinler) - son 200 adet 5 dakikalık kapanış
+// ── Binance veri çek (Coin) ───────────────────────────────────────────────────
+
 async function fetchBinance(symbol) {
   try {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=200`;
-    const res = await axios.get(url);
-    return res.data.map(k => parseFloat(k[4])); // kapanış fiyatı
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=200`
+    const res = await axios.get(url)
+    return res.data.map(k => parseFloat(k[4])) // kapanış fiyatı
   } catch (err) {
-    console.error(`${symbol} Binance hatası: ${err.message}`);
-    return null;
+    console.error(`${symbol} veri hatası: ${err.message}`)
+    return null
   }
 }
 
-// ------------------- TELEGRAM MESAJ -------------------
+// ── Telegram mesaj gönder ─────────────────────────────────────────────────────
+
 async function sendTelegram(msg) {
   try {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: msg,
+      chat_id:    TELEGRAM_CHAT_ID,
+      text:       msg,
       parse_mode: 'HTML'
-    });
+    })
   } catch (err) {
-    console.error('Telegram hatası:', err.message);
+    console.error('Telegram hatası:', err.message)
   }
 }
 
-// ------------------- HIZLI SİNYAL MANTIĞI (EMA 5/13) -------------------
-async function sinyalKontrol(sembol, closes, paraBirimi) {
-  if (!closes || closes.length < 20) {
-    // Yeterli veri yoksa bekle
-    return;
+// ── Sinyal motoru (ortak) ─────────────────────────────────────────────────────
+
+async function sinyalKontrol(sembol, closes, para) {
+  if (!closes || closes.length < 50) {
+    console.log(`${sembol} | Yetersiz veri`)
+    return
   }
 
-  const d = durum[sembol];
-  const n = closes.length - 1;
+  const d      = durum[sembol]
+  const mavw   = calcMAVW(closes, 3, 5)
+  const t3     = calcT3(closes, 7, 0.7)
+  const n      = closes.length - 1
 
-  // EMA hesaplamaları (sadece son 2 değer yeterli, ama emaArr tüm seriyi döndürür)
-  const ema5Tum = emaArr(closes, 5);
-  const ema13Tum = emaArr(closes, 13);
-  const ema5 = ema5Tum[n];
-  const ema13 = ema13Tum[n];
-  const oncekiEma5 = ema5Tum[n - 1];
-  const oncekiEma13 = ema13Tum[n - 1];
+  const t3Son    = t3[n]
+  const t3Prev   = t3[n - 1]
+  const t3Prev2  = t3[n - 2]
+  const mavwSon  = mavw[n]
+  const mavwPrev = mavw[n - 1]
+  const closeSon = closes[n]
 
-  // AL koşulu: EMA5 EMA13'ü yukarı kesmiş (önceki barda kesişme yoktu, şimdi var) VE fiyat EMA5'in üstünde
-  const alSart = (oncekiEma5 <= oncekiEma13) && (ema5 > ema13) && (closes[n] > ema5);
+  const mavwKirmizi = mavwSon < mavwPrev
+  const t3K2Y = t3Son > t3Prev && t3Prev <= t3Prev2
+  const t3Y2K = t3Son < t3Prev && t3Prev >= t3Prev2
 
-  // SAT koşulu: Sadece AL sinyali alınmışsa (pozisyon açıksa) ve EMA5 EMA13'ü aşağı kesmiş
-  const satSart = (d.lastSignal === 1) && (oncekiEma5 >= oncekiEma13) && (ema5 < ema13) && (closes[n] < ema5);
+  const ema5Val  = emaArr(closes, 5)[n]
+  const ema7Val  = emaArr(closes, 7)[n]
+  const ema10Val = emaArr(closes, 10)[n]
+  const ema13Val = emaArr(closes, 13)[n]
 
-  const saat = new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' });
-  const ad = sembol.replace('.IS', '').replace('USDT', '');
+  const alSart = t3K2Y && t3Son < mavwSon && mavwKirmizi
+
+  let activeEma = null
+  if (d.lastSignal === 1 && d.alBar !== null) {
+    const barsFromAl = n - d.alBar
+    if      (barsFromAl === 1) activeEma = ema5Val
+    else if (barsFromAl === 2) activeEma = ema7Val
+    else if (barsFromAl === 3) activeEma = ema7Val
+    else if (barsFromAl === 4) activeEma = ema10Val
+    else                       activeEma = ema13Val
+  }
+
+  const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
+
+  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  const ad   = sembol.replace('.IS', '').replace('USDT', '')
 
   // AL sinyali
   if (alSart && d.lastSignal !== 1) {
-    d.lastSignal = 1;
-    d.alPrice = closes[n];
+    d.lastSignal = 1
+    d.alBar      = n
+    d.alPrice    = closeSon
 
-    const mesaj = `🟢 <b>AL — ${ad}</b>\n` +
-                  `💰 Fiyat: ${closes[n].toFixed(4)} ${paraBirimi}\n` +
-                  `📈 EMA5: ${ema5.toFixed(4)} | EMA13: ${ema13.toFixed(4)}\n` +
-                  `🕐 ${saat}`;
-    await sendTelegram(mesaj);
-    console.log(`✅ AL: ${sembol} @ ${closes[n]}`);
+    await sendTelegram(
+      `🟢 <b>AL — ${ad}</b>\n` +
+      `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
+      `📊 T3: ${t3Son.toFixed(4)} | MAVW: ${mavwSon.toFixed(4)}\n` +
+      `🕐 ${saat}`
+    )
+    console.log(`✅ AL: ${sembol} @ ${closeSon}`)
   }
 
   // SAT sinyali
   if (satSart && d.lastSignal !== -1) {
-    const pct = ((closes[n] - d.alPrice) / d.alPrice * 100).toFixed(2);
-    const emoji = parseFloat(pct) >= 0 ? '📈' : '📉';
-    const mesaj = `🔴 <b>SAT — ${ad}</b>\n` +
-                  `💰 Fiyat: ${closes[n].toFixed(4)} ${paraBirimi}\n` +
-                  `${emoji} Kar/Zarar: %${pct}\n` +
-                  `🕐 ${saat}`;
-    await sendTelegram(mesaj);
-    console.log(`🔴 SAT: ${sembol} @ ${closes[n]} | %${pct}`);
-    d.lastSignal = -1;  // Pozisyon kapandı
+    const period = n - d.alBar
+    const pct    = ((closeSon - d.alPrice) / d.alPrice * 100).toFixed(2)
+    const emoji  = parseFloat(pct) >= 0 ? '📈' : '📉'
+
+    d.lastSignal = -1
+
+    await sendTelegram(
+      `🔴 <b>SAT — ${ad}</b>\n` +
+      `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
+      `⏱ Periyot: ${period} bar\n` +
+      `${emoji} Kar/Zarar: %${pct}\n` +
+      `🕐 ${saat}`
+    )
+    console.log(`🔴 SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
   }
 }
 
-// ------------------- ANA KONTROL DÖNGÜSÜ -------------------
-async function kontrolEt() {
-  const baslangic = Date.now();
-  const saat = new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' });
-  console.log(`[${saat}] Kontrol başladı...`);
+// ── Ana kontrol döngüsü ───────────────────────────────────────────────────────
 
-  // Hisse senetleri
+async function kontrolEt() {
+  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  console.log(`[${saat}] Kontrol başladı...`)
+
+  // BIST hisseleri
   for (const sembol of HISSELER) {
-    const closes = await fetchYahoo(sembol);
-    if (closes) await sinyalKontrol(sembol, closes, '₺');
-    // Rate limiting: her hisse arasında küçük bir bekleme (isteğe bağlı)
-    await new Promise(resolve => setTimeout(resolve, 200));
+    const closes = await fetchYahoo(sembol)
+    await sinyalKontrol(sembol, closes, '₺')
   }
 
   // Coinler
   for (const sembol of COINLER) {
-    const closes = await fetchBinance(sembol);
-    if (closes) await sinyalKontrol(sembol, closes, '$');
-    await new Promise(resolve => setTimeout(resolve, 200));
+    const closes = await fetchBinance(sembol)
+    await sinyalKontrol(sembol, '$')
   }
 
-  const sure = ((Date.now() - baslangic) / 1000).toFixed(1);
-  console.log(`[${new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul'})}] Kontrol bitti. (${sure} sn)`);
+  console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
 }
 
-// ------------------- WEB SUNUCU -------------------
-app.get('/', (req, res) => res.send('Sinyal botu çalışıyor ✅ (hızlı EMA stratejisi)'));
+// ── Sunucu ────────────────────────────────────────────────────────────────────
+
+app.get('/', (req, res) => res.send('Sinyal botu çalışıyor ✅'))
 
 app.get('/test', async (req, res) => {
-  await sendTelegram('🧪 <b>Test mesajı</b>\nBot aktif ve hızlı sinyal mantığı ile çalışıyor ✅');
-  res.send('Telegram mesajı gönderildi');
-});
+  await sendTelegram('🧪 <b>Test mesajı</b>\nBot çalışıyor ✅')
+  res.send('Telegram mesajı gönderildi')
+})
 
 app.listen(3000, () => {
-  console.log('Sunucu 3000 portunda başladı');
-  // İlk kontrolü hemen yap, sonra her 5 dakikada bir tekrarla
-  kontrolEt();
-  setInterval(kontrolEt, 5 * 60 * 1000);
-});
+  console.log('Sunucu başladı')
+  kontrolEt()
+  setInterval(kontrolEt, 5 * 60 * 1000)
+})
