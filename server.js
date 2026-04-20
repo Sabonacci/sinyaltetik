@@ -117,7 +117,7 @@ async function sendTelegram(msg) {
 // ── Ana sinyal motoru ─────────────────────────────────────────────────────────
 
 async function kontrolEt() {
-  console.log(`[${new Date().toLocaleTimeString('tr-TR')}] Kontrol başladı...`)
+  console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol başladı...`)
 
   for (const sembol of HISSELER) {
     const closes = await fetchPrices(sembol)
@@ -191,7 +191,7 @@ async function kontrolEt() {
         `💰 Fiyat: ${closeSon.toFixed(2)} ₺\n` +
         `⏱ Periyot: ${period} bar\n` +
         `${emoji} Kar/Zarar: %${pct}\n` +
-        `🕐 ${new Date().toLocaleTimeString('tr-TR')}`
+        `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
       )
       console.log(`🔴 SAT SİNYALİ: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
     }
