@@ -255,7 +255,8 @@ async function sinyalKontrol(sembol, closes, para) {
     else                       activeEma = ema13Val
   }
 
-  const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
+  const ema5Kirdi = d.lastSignal === 1 && d.alBar !== null && (n - d.alBar) >= 1 && closeSon < ema5Val
+  const satSart   = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma && ema5Kirdi
   const saat    = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
   const ad      = sembol.replace('.IS', '').replace('USDT', '')
 
