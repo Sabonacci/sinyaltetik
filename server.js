@@ -25,8 +25,25 @@ const durum = {}
 })
 
 // Günlük işlem geçmişi
-var gunlukIslemler = []
-var gunlukDevamEden = []
+const fs = require('fs')
+const DOSYA = '/tmp/islemler.json'
+
+function islemleriYukle() {
+  try {
+    if (fs.existsSync(DOSYA)) {
+      return JSON.parse(fs.readFileSync(DOSYA, 'utf8'))
+    }
+  } catch(e) {}
+  return []
+}
+
+function islemleriKaydet() {
+  try {
+    fs.writeFileSync(DOSYA, JSON.stringify(gunlukIslemler))
+  } catch(e) {}
+}
+
+var gunlukIslemler = islemleriYukle()
 
 // ── Yardımcı fonksiyonlar ─────────────────────────────────────────────────────
 
@@ -141,7 +158,7 @@ async function sendTelegram(msg) {
 async function gunlukRapor() {
   const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
   const tarih = new Date().toLocaleDateString('tr-TR', {timeZone: 'Europe/Istanbul'})
-
+islemleriKaydet()
   let msg = `📊 <b>GÜNLÜK RAPOR — ${tarih}</b>\n`
   msg += `🕐 ${saat}\n`
   msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
@@ -257,7 +274,7 @@ async function sinyalKontrol(sembol, closes, para) {
       pct:      0,
       para
     })
-
+islemleriKaydet()
     await sendTelegram(
       `🟢 <b>AL — ${ad}</b>\n` +
       `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
@@ -282,7 +299,7 @@ async function sinyalKontrol(sembol, closes, para) {
       gunlukIslemler[idx].period   = period
       gunlukIslemler[idx].pct      = pct
     }
-
+islemleriKaydet()
     await sendTelegram(
       `🔴 <b>SAT — ${ad}</b>\n` +
       `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
