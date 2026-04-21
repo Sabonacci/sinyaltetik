@@ -319,6 +319,13 @@ async function kontrolEt() {
 
   saatKontrol()
 
+  // XU100 endeks kontrolü
+  const xu100Closes = await fetchYahoo('XU100.IS')
+  const xu100Yukseliyor = xu100Closes && xu100Closes.length >= 2
+    ? xu100Closes[xu100Closes.length - 1] > xu100Closes[xu100Closes.length - 2]
+    : false
+  console.log(`XU100 yükseliyor: ${xu100Yukseliyor}`)
+
   for (const sembol of HISSELER) {
     const closes = await fetchYahoo(sembol)
     await sinyalKontrol(sembol, closes, '₺')
