@@ -12,7 +12,7 @@ const HISSELER = [
 
 const COINLER = [
   'BTCUSDT','XRPUSDT','DASHUSDT','SOLUSDT',
-  'ETHUSDT','ETHFIUSDT','POLUSDT'
+  'ETHUSDT','ETHFIUSDT','MATICUSDT'
 ]
 
 const durum = {}
@@ -130,9 +130,11 @@ async function fetchYahoo(symbol) {
 
 async function fetchBinance(symbol) {
   try {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=200`
-    const res = await axios.get(url)
-    return res.data.map(k => parseFloat(k[4]))
+    const coin = symbol.replace('USDT', '-USD')
+    const url  = `https://api.exchange.coinbase.com/products/${coin}/candles?granularity=300`
+    const res  = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    // Coinbase [time, low, high, open, close, volume] döndürür, eskiden yeniye sırala
+    return res.data.reverse().map(k => parseFloat(k[4]))
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
     return null
