@@ -6,8 +6,8 @@ const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '-1003975259428'
 
 const HISSELER = [
-  'ECILC.IS','SUWEN.IS','PEKGY.IS','LMKDC.IS','TRENJ.IS',
-  'GESAN.IS','EUPWR.IS','MAKIM.IS','ARENA.IS','PATEK.IS'
+  'ECILC.IS','NETCD.IS','PEKGY.IS','LMKDC.IS','TRENJ.IS',
+  'GESAN.IS','EUPWR.IS','YEOTK.IS','ARTMS.IS','PCILT.IS'
 ]
 
 const COINLER = [
@@ -23,6 +23,10 @@ const durum = {}
     alPrice:    null
   }
 })
+
+// Günlük işlem geçmişi
+var gunlukIslemler = []
+var gunlukDevamEden = []
 
 // ── Yardımcı fonksiyonlar ─────────────────────────────────────────────────────
 
@@ -111,7 +115,7 @@ async function fetchBinance(symbol) {
   try {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=200`
     const res = await axios.get(url)
-    return res.data.map(k => parseFloat(k[4])) // kapanış fiyatı
+    return res.data.map(k => parseFloat(k[4]))
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
     return null
@@ -132,13 +136,75 @@ async function sendTelegram(msg) {
   }
 }
 
-// ── Sinyal motoru (ortak) ─────────────────────────────────────────────────────
+// ── Günlük rapor gönder ───────────────────────────────────────────────────────
+
+async function gunlukRapor() {
+  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  const tarih = new Date().toLocaleDateString('tr-TR', {timeZone: 'Europe/Istanbul'})
+
+  let msg = `📊 <b>GÜNLÜK RAPOR — ${tarih}</b>\n`
+  msg += `🕐 ${saat}\n`
+  msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
+
+  // Tamamlanan işlemler
+  const tamamlanan = gunlukIslemler.filter(i => i.satFiyat !== null)
+  const karlilar   = tamamlanan.filter(i => i.pct >= 0)
+  const zararlılar = tamamlanan.filter(i => i.pct < 0)
+  const toplamPct  = tamamlanan.reduce((acc, i) => acc + i.pct, 0)
+
+  msg += `✅ <b>Tamamlanan İşlemler: ${tamamlanan.length}</b>\n`
+  msg += `📈 Karlı: ${karlilar.length} | 📉 Zararlı: ${zararlılar.length}\n`
+
+  if (tamamlanan.length > 0) {
+    msg += `💰 Toplam: %${toplamPct.toFixed(2)}\n\n`
+
+    tamamlanan.forEach(i => {
+      const emoji = i.pct >= 0 ? '📈' : '📉'
+      msg += `${emoji} <b>${i.sembol}</b>\n`
+      msg += `   Al: ${i.alFiyat} → Sat: ${i.satFiyat}\n`
+      msg += `   Periyot: ${i.period} bar | %${i.pct.toFixed(2)}\n`
+    })
+  }
+
+  // Devam eden işlemler
+  const devamEden = Object.entries(durum).filter(([_, d]) => d.lastSignal === 1)
+
+  msg += `\n━━━━━━━━━━━━━━━━━━━━\n`
+  msg += `⏳ <b>Devam Eden İşlemler: ${devamEden.length}</b>\n\n`
+
+  if (devamEden.length > 0) {
+    devamEden.forEach(([sembol, d]) => {
+      const ad  = sembol.replace('.IS', '').replace('USDT', '')
+      const pct = d.alPrice ? 'hesaplanıyor' : '-'
+      msg += `🔵 <b>${ad}</b>\n`
+      msg += `   Al Fiyatı: ${d.alPrice ? d.alPrice.toFixed(4) : '-'}\n`
+    })
+  } else {
+    msg += `Devam eden işlem yok.\n`
+  }
+
+  msg += `\n━━━━━━━━━━━━━━━━━━━━`
+
+  await sendTelegram(msg)
+  console.log('📊 Günlük rapor gönderildi.')
+
+  // Günlük listeyi sıfırla
+  gunlukIslemler = []
+}
+
+// ── Saat kontrolü (18:30) ─────────────────────────────────────────────────────
+
+function saatKontrol() {
+  const simdi = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  if (simdi.startsWith('18:30')) {
+    gunlukRapor()
+  }
+}
+
+// ── Sinyal motoru ─────────────────────────────────────────────────────────────
 
 async function sinyalKontrol(sembol, closes, para) {
-  if (!closes || closes.length < 50) {
-    console.log(`${sembol} | Yetersiz veri`)
-    return
-  }
+  if (!closes || closes.length < 50) return
 
   const d      = durum[sembol]
   const mavw   = calcMAVW(closes, 3, 5)
@@ -154,7 +220,6 @@ async function sinyalKontrol(sembol, closes, para) {
 
   const mavwKirmizi = mavwSon < mavwPrev
   const t3K2Y = t3Son > t3Prev && t3Prev <= t3Prev2
-  const t3Y2K = t3Son < t3Prev && t3Prev >= t3Prev2
 
   const ema5Val  = emaArr(closes, 5)[n]
   const ema7Val  = emaArr(closes, 7)[n]
@@ -174,15 +239,24 @@ async function sinyalKontrol(sembol, closes, para) {
   }
 
   const satSart = d.lastSignal === 1 && activeEma !== null && closeSon < activeEma
-
-  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
-  const ad   = sembol.replace('.IS', '').replace('USDT', '')
+  const saat    = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  const ad      = sembol.replace('.IS', '').replace('USDT', '')
 
   // AL sinyali
   if (alSart && d.lastSignal !== 1) {
     d.lastSignal = 1
     d.alBar      = n
     d.alPrice    = closeSon
+
+    // Günlük listeye ekle
+    gunlukIslemler.push({
+      sembol:   ad,
+      alFiyat:  closeSon.toFixed(4),
+      satFiyat: null,
+      period:   0,
+      pct:      0,
+      para
+    })
 
     await sendTelegram(
       `🟢 <b>AL — ${ad}</b>\n` +
@@ -196,19 +270,27 @@ async function sinyalKontrol(sembol, closes, para) {
   // SAT sinyali
   if (satSart && d.lastSignal !== -1) {
     const period = n - d.alBar
-    const pct    = ((closeSon - d.alPrice) / d.alPrice * 100).toFixed(2)
-    const emoji  = parseFloat(pct) >= 0 ? '📈' : '📉'
+    const pct    = ((closeSon - d.alPrice) / d.alPrice * 100)
+    const emoji  = pct >= 0 ? '📈' : '📉'
 
     d.lastSignal = -1
+
+    // Günlük listede ilgili işlemi güncelle
+    const idx = gunlukIslemler.findIndex(i => i.sembol === ad && i.satFiyat === null)
+    if (idx !== -1) {
+      gunlukIslemler[idx].satFiyat = closeSon.toFixed(4)
+      gunlukIslemler[idx].period   = period
+      gunlukIslemler[idx].pct      = pct
+    }
 
     await sendTelegram(
       `🔴 <b>SAT — ${ad}</b>\n` +
       `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
       `⏱ Periyot: ${period} bar\n` +
-      `${emoji} Kar/Zarar: %${pct}\n` +
+      `${emoji} Kar/Zarar: %${pct.toFixed(2)}\n` +
       `🕐 ${saat}`
     )
-    console.log(`🔴 SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct}`)
+    console.log(`🔴 SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct.toFixed(2)}`)
   }
 }
 
@@ -218,16 +300,16 @@ async function kontrolEt() {
   const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
   console.log(`[${saat}] Kontrol başladı...`)
 
-  // BIST hisseleri
+  saatKontrol()
+
   for (const sembol of HISSELER) {
     const closes = await fetchYahoo(sembol)
     await sinyalKontrol(sembol, closes, '₺')
   }
 
-  // Coinler
   for (const sembol of COINLER) {
     const closes = await fetchBinance(sembol)
-    await sinyalKontrol(sembol, '$')
+    await sinyalKontrol(sembol, closes, '$')
   }
 
   console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
@@ -240,6 +322,11 @@ app.get('/', (req, res) => res.send('Sinyal botu çalışıyor ✅'))
 app.get('/test', async (req, res) => {
   await sendTelegram('🧪 <b>Test mesajı</b>\nBot çalışıyor ✅')
   res.send('Telegram mesajı gönderildi')
+})
+
+app.get('/rapor', async (req, res) => {
+  await gunlukRapor()
+  res.send('Rapor gönderildi')
 })
 
 app.listen(3000, () => {
