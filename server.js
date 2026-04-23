@@ -8,6 +8,7 @@ const TELEGRAM_CHAT_ID = '-1003975259428'
 
 const HISSELER = [
   'ECILC.IS','NETCD.IS','PEKGY.IS','LMKDC.IS','TRENJ.IS',
+  'THYAO.IS','EREGL.IS','TUPRS.IS','ASELS.IS','TRALT',
   'GESAN.IS','EUPWR.IS','YEOTK.IS','ARTMS.IS','PCILT.IS'
 ]
 
@@ -34,11 +35,10 @@ var gunlukIslemler = islemleriYukle()
 const durum = {}
 ;[...HISSELER, ...COINLER].forEach(h => {
   durum[h] = {
-    lastSignal:   0,
-    alBar:        null,
-    alPrice:      null,
-    stokAltinda:  false,  // stokastik %k < 20 görüldü mü
-    stokUstunde:  false   // stokastik %k > 80 görüldü mü
+    lastSignal: 0,
+    alBar:      null,
+    alPrice:    null,
+    tpLevel:    null
   }
 })
 
@@ -54,60 +54,81 @@ function emaArr(arr, len) {
   return result
 }
 
-// Chebyshev filtreli RSI (önceki koddan)
-function calcRSI(closes, rsiLen, smoothLen) {
-  const alpha = 2.0 / (smoothLen + 1.0)
-
-  // Cheby smooth
-  const cheby = []
-  let prev = closes[0]
-  for (let i = 0; i < closes.length; i++) {
-    prev = alpha * closes[i] + (1 - alpha) * prev
-    cheby.push(prev)
+function smaArr(arr, len) {
+  const result = []
+  for (let i = 0; i < arr.length; i++) {
+    if (i < len - 1) { result.push(arr[i]); continue }
+    const sum = arr.slice(i - len + 1, i + 1).reduce((a, b) => a + b, 0)
+    result.push(sum / len)
   }
+  return result
+}
 
-  const upRaw   = cheby.map((v, i) => i === 0 ? 0 : Math.max(v - cheby[i-1], 0))
-  const downRaw = cheby.map((v, i) => i === 0 ? 0 : Math.max(cheby[i-1] - v, 0))
-
-  // EMA smooth
-  const upS   = emaArr(upRaw,   rsiLen)
-  const downS = emaArr(downRaw, rsiLen)
-
-  return upS.map((u, i) => {
-    const d = downS[i]
-    return d === 0 ? 100 : 100 - (100 / (1 + u / d))
+function atrArr(highs, lows, closes, len) {
+  const tr = closes.map((c, i) => {
+    if (i === 0) return highs[i] - lows[i]
+    return Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i]  - closes[i - 1])
+    )
   })
+  return emaArr(tr, len)
 }
 
-// Stokastik %K hesabı
-function calcStoch(highs, lows, closes, kLen = 14, smoothK = 3) {
-  const rawK = []
-  for (let i = 0; i < closes.length; i++) {
-    if (i < kLen - 1) { rawK.push(50); continue }
-    const slice_h = highs.slice(i - kLen + 1, i + 1)
-    const slice_l = lows.slice(i - kLen + 1,  i + 1)
-    const hh = Math.max(...slice_h)
-    const ll = Math.min(...slice_l)
-    rawK.push(hh === ll ? 50 : ((closes[i] - ll) / (hh - ll)) * 100)
+// Supertrend hesabı
+function calcSupertrend(highs, lows, closes, period, multiplier) {
+  const hl2   = closes.map((_, i) => (highs[i] + lows[i]) / 2)
+  const atr   = atrArr(highs, lows, closes, period)
+  const n     = closes.length
+
+  const up    = new Array(n).fill(0)
+  const dn    = new Array(n).fill(0)
+  const trend = new Array(n).fill(1)
+
+  up[0] = hl2[0] - multiplier * atr[0]
+  dn[0] = hl2[0] + multiplier * atr[0]
+
+  for (let i = 1; i < n; i++) {
+    const rawUp = hl2[i] - multiplier * atr[i]
+    const rawDn = hl2[i] + multiplier * atr[i]
+
+    up[i] = closes[i - 1] > up[i - 1] ? Math.max(rawUp, up[i - 1]) : rawUp
+    dn[i] = closes[i - 1] < dn[i - 1] ? Math.min(rawDn, dn[i - 1]) : rawDn
+
+    if (trend[i - 1] === -1 && closes[i] > dn[i - 1]) trend[i] = 1
+    else if (trend[i - 1] === 1 && closes[i] < up[i - 1]) trend[i] = -1
+    else trend[i] = trend[i - 1]
   }
-  // %K smoothing
-  const smoothed = emaArr(rawK, smoothK)
-  return smoothed
+
+  return { up, dn, trend }
 }
 
-// ── Yahoo Finance (BIST, 15dk) ────────────────────────────────────────────────
+// WaveTrend hesabı
+function calcWaveTrend(highs, lows, closes, n1 = 10, n2 = 21) {
+  const hlc3 = closes.map((c, i) => (highs[i] + lows[i] + c) / 3)
+  const esa  = emaArr(hlc3, n1)
+  const d    = emaArr(hlc3.map((v, i) => Math.abs(v - esa[i])), n1)
+  const ci   = hlc3.map((v, i) => d[i] === 0 ? 0 : (v - esa[i]) / (0.015 * d[i]))
+  const wt1  = emaArr(ci, n2)
+  const wt2  = smaArr(wt1, 4)
+  return { wt1, wt2 }
+}
+
+// ── Yahoo Finance (1dk) ───────────────────────────────────────────────────────
 
 async function fetchYahoo(symbol) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=15m&range=5d`
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&range=1d`
     const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-    const q = res.data.chart.result[0].indicators.quote[0]
-    const closes = q.close.map((c, i) => ({ c, h: q.high[i], l: q.low[i] }))
-      .filter(x => x.c !== null && x.h !== null && x.l !== null)
+    const q   = res.data.chart.result[0].indicators.quote[0]
+    const raw = q.close.map((c, i) => ({
+      c: c, h: q.high[i], l: q.low[i]
+    })).filter(x => x.c !== null && x.h !== null && x.l !== null)
     return {
-      closes: closes.map(x => parseFloat(x.c.toFixed(4))),
-      highs:  closes.map(x => parseFloat(x.h.toFixed(4))),
-      lows:   closes.map(x => parseFloat(x.l.toFixed(4)))
+      closes: raw.map(x => parseFloat(x.c.toFixed(4))),
+      highs:  raw.map(x => parseFloat(x.h.toFixed(4))),
+      lows:   raw.map(x => parseFloat(x.l.toFixed(4)))
     }
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
@@ -115,12 +136,12 @@ async function fetchYahoo(symbol) {
   }
 }
 
-// ── Coinbase (15dk) ───────────────────────────────────────────────────────────
+// ── Coinbase (1dk) ────────────────────────────────────────────────────────────
 
 async function fetchCoinbase(symbol) {
   try {
     const coin = symbol.replace('USDT', '-USD')
-    const url  = `https://api.exchange.coinbase.com/products/${coin}/candles?granularity=900`
+    const url  = `https://api.exchange.coinbase.com/products/${coin}/candles?granularity=60`
     const res  = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
     const data = res.data.reverse()
     return {
@@ -157,26 +178,24 @@ async function gunlukRapor() {
   const zararlilar = tamamlanan.filter(i => i.pct < 0)
   const toplamPct  = tamamlanan.reduce((acc, i) => acc + i.pct, 0)
 
-  msg += `✅ <b>Tamamlanan: ${tamamlanan.length}</b>  `
-  msg += `🟢 Kâr: ${karlilar.length} | 🔴 Zarar: ${zararlilar.length}\n`
+  msg += `✅ <b>Tamamlanan: ${tamamlanan.length}</b>  🟢 Kâr: ${karlilar.length} | 🔴 Zarar: ${zararlilar.length}\n`
 
   if (tamamlanan.length > 0) {
     msg += `💰 Toplam: %${toplamPct.toFixed(2)}\n\n`
     tamamlanan.forEach(i => {
       const ok = i.pct >= 0 ? '🟢 ▲' : '🔴 ▼'
-      msg += `${ok} <b>${i.sembol}</b>  Al:${i.alFiyat} → Sat:${i.satFiyat}  %${i.pct.toFixed(2)}\n`
+      msg += `${ok} <b>${i.sembol}</b>  Al:${i.alFiyat} → Sat:${i.satFiyat}  %${Math.abs(i.pct).toFixed(2)}\n`
     })
   }
 
   const devamEden = Object.entries(durum).filter(([_, d]) => d.lastSignal === 1)
   msg += `\n━━━━━━━━━━━━━━━━━━━━\n⏳ <b>Devam Eden: ${devamEden.length}</b>\n\n`
-
   devamEden.forEach(([sembol, d]) => {
     const ad = sembol.replace('.IS','').replace('USDT','')
     msg += `🔵 <b>${ad}</b>  Al: ${d.alPrice ? d.alPrice.toFixed(4) : '-'}\n`
   })
-
   msg += `\n━━━━━━━━━━━━━━━━━━━━`
+
   await sendTelegram(msg)
   console.log('📊 Günlük rapor gönderildi.')
   gunlukIslemler = []
@@ -191,61 +210,84 @@ function saatKontrol() {
 // ── Sinyal motoru ─────────────────────────────────────────────────────────────
 
 async function sinyalKontrol(sembol, veri, para, xu100Yukseliyor = true) {
-  if (!veri || veri.closes.length < 50) return
+  if (!veri || veri.closes.length < 30) return
 
   const { closes, highs, lows } = veri
-  const d   = durum[sembol]
-  const n   = closes.length - 1
-  const ad  = sembol.replace('.IS','').replace('USDT','')
-
-  // RSI hesabı
-  const rsiDizi  = calcRSI(closes, 14, 3)
-  const rsiSon   = rsiDizi[n]
-
-  // Stokastik %K hesabı
-  const stokDizi = calcStoch(highs, lows, closes, 14, 3)
-  const stokSon  = stokDizi[n]
-
+  const d        = durum[sembol]
+  const n        = closes.length - 1
+  const ad       = sembol.replace('.IS','').replace('USDT','')
   const closeSon = closes[n]
   const saat     = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  const tpPerc   = 0.007 // %0.5 kar hedefi
 
-  // Stokastik eşik hafızası güncelle
-  if (stokSon < 20) d.stokAltinda = true
-  if (stokSon > 80) d.stokUstunde = true
+  // Supertrend 1: sinyal bandı (10, 2.7)
+  const st1 = calcSupertrend(highs, lows, closes, 10, 2.7)
+  // Supertrend 2: trend bandı (13, 5.0)
+  const st2 = calcSupertrend(highs, lows, closes, 13, 5.0)
 
-  // AL şartı: stok < 20 görüldü VE rsi < 30 VE xu100 yükseliyor (sadece hisseler)
-  const alSart = d.stokAltinda && rsiSon < 30 && xu100Yukseliyor
+  // WaveTrend
+  const { wt1, wt2 } = calcWaveTrend(highs, lows, closes, 10, 21)
 
-  // SAT şartı: stok > 80 görüldü VE rsi > 70
-  const satSart = d.lastSignal === 1 && d.stokUstunde && rsiSon > 70
+  const trend1Son  = st1.trend[n]
+  const trend1Prev = st1.trend[n - 1]
+  const trend2Son  = st2.trend[n]
+
+  // Buy sinyali: trend1 -1'den 1'e döndü
+  const buySignal = trend1Son === 1 && trend1Prev === -1
+
+  // Son 7 periyotta wt1 wt2'yi yukarı kesti VE kesişim anında wt1 < -30
+  let wtCrossedRecently = false
+  for (let i = 0; i <= 6; i++) {
+    const idx = n - i
+    if (idx < 1) break
+    const cross = wt1[idx] > wt2[idx] && wt1[idx - 1] <= wt2[idx - 1]
+    if (cross && wt1[idx] < -30) {
+      wtCrossedRecently = true
+      break
+    }
+  }
+
+  // Kesin AL: buySignal + wtCrossedRecently + trend2 == 1 + xu100 yükseliyor
+  const kesinAl = buySignal && wtCrossedRecently && trend2Son === 1 && xu100Yukseliyor
+
+  // Kesin SAT: pozisyon açık + fiyat TP seviyesine ulaştı
+  const kesinSat = d.lastSignal === 1 && d.tpLevel !== null && closeSon >= d.tpLevel
 
   // AL sinyali
-  if (alSart && d.lastSignal !== 1) {
-    d.lastSignal  = 1
-    d.alBar       = n
-    d.alPrice     = closeSon
-    d.stokAltinda = false  // sıfırla
+  if (kesinAl && d.lastSignal !== 1) {
+    d.lastSignal = 1
+    d.alBar      = n
+    d.alPrice    = closeSon
+    d.tpLevel    = parseFloat((closeSon * (1 + tpPerc)).toFixed(4))
 
-    gunlukIslemler.push({ sembol: ad, alFiyat: closeSon.toFixed(4), satFiyat: null, period: 0, pct: 0, para })
+    gunlukIslemler.push({
+      sembol:   ad,
+      alFiyat:  closeSon.toFixed(4),
+      satFiyat: null,
+      period:   0,
+      pct:      0,
+      para
+    })
     islemleriKaydet()
 
     await sendTelegram(
-      `🟢 <b>AL — ${ad}</b>\n` +
+      `🟢 <b>KESİN AL — ${ad}</b>\n` +
       `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
-      `📊 RSI: ${rsiSon.toFixed(1)} | Stok%K: ${stokSon.toFixed(1)}\n` +
+      `🎯 Hedef: ${d.tpLevel} ${para} (+%0.5)\n` +
+      `📊 WT1: ${wt1[n].toFixed(1)} | Trend2: ${trend2Son === 1 ? '▲' : '▼'}\n` +
       `🕐 ${saat}`
     )
-    console.log(`✅ AL: ${sembol} @ ${closeSon} | RSI:${rsiSon.toFixed(1)} | Stok:${stokSon.toFixed(1)}`)
+    console.log(`✅ KESİN AL: ${sembol} @ ${closeSon} | TP: ${d.tpLevel}`)
   }
 
   // SAT sinyali
-  if (satSart && d.lastSignal !== -1) {
+  if (kesinSat && d.lastSignal !== -1) {
     const period = n - d.alBar
     const pct    = ((closeSon - d.alPrice) / d.alPrice * 100)
     const ok     = pct >= 0 ? '🟢 ▲ KAR' : '🔴 ▼ ZARAR'
 
-    d.lastSignal  = -1
-    d.stokUstunde = false  // sıfırla
+    d.lastSignal = -1
+    d.    = null
 
     const idx = gunlukIslemler.findIndex(i => i.sembol === ad && i.satFiyat === null)
     if (idx !== -1) {
@@ -256,14 +298,13 @@ async function sinyalKontrol(sembol, veri, para, xu100Yukseliyor = true) {
     islemleriKaydet()
 
     await sendTelegram(
-      `🔴 <b>SAT — ${ad}</b>\n` +
+      `🔴 <b>KESİN SAT — ${ad}</b>\n` +
       `💰 Fiyat: ${closeSon.toFixed(4)} ${para}\n` +
-      `📊 RSI: ${rsiSon.toFixed(1)} | Stok%K: ${stokSon.toFixed(1)}\n` +
       `⏱ Periyot: ${period} bar\n` +
       `${ok}: %${Math.abs(pct).toFixed(2)}\n` +
       `🕐 ${saat}`
     )
-    console.log(`🔴 SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct.toFixed(2)}`)
+    console.log(`🔴 KESİN SAT: ${sembol} @ ${closeSon} | ${period} bar | %${pct.toFixed(2)}`)
   }
 }
 
@@ -311,5 +352,5 @@ app.get('/rapor', async (req, res) => {
 app.listen(3000, () => {
   console.log('Sunucu başladı')
   kontrolEt()
-  setInterval(kontrolEt, 15 * 60 * 1000)
+  setInterval(kontrolEt, 60 * 1000) // her 1 dakika
 })
