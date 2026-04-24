@@ -286,7 +286,7 @@ async function sinyalKontrol(sembol, veri, para, xu100Yukseliyor = true) {
     const ok     = pct >= 0 ? '🟢 ▲ KAR' : '🔴 ▼ ZARAR'
 
     d.lastSignal = -1
-    d.    = null
+    d.tpLevel = null
 
     const idx = gunlukIslemler.findIndex(i => i.sembol === ad && i.satFiyat === null)
     if (idx !== -1) {
