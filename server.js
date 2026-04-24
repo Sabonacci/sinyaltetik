@@ -203,6 +203,31 @@ async function gunlukRapor() {
 
 function saatKontrol() {
   const simdi = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  
+  if (simdi.startsWith('09:30')) {
+    const tarih = new Date().toLocaleDateString('tr-TR', {timeZone: 'Europe/Istanbul'})
+    sendTelegram(
+      `🔔 <b>Allah CC işinizi gücünüzü rast getirsin</b>\n` +
+      `📅 ${tarih}\n` +
+      `🕐 09:30\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📊 Takip edilen hisse: 10\n` +
+      `🪙 Takip edilen coin: 7\n` +
+      `✅ Sinyal botu aktif`
+    )
+  }
+
+  if (simdi.startsWith('18:15')) {
+    const tarih = new Date().toLocaleDateString('tr-TR', {timeZone: 'Europe/Istanbul'})
+    sendTelegram(
+      `🔔 <b>Rızkı veren Hüda dır kula minnet eylemem</b>\n` +
+      `📅 ${tarih}\n` +
+      `🕐 18:15\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📊 Günlük rapor 18:30'da gönderilecek`
+    )
+  }
+
   if (simdi.startsWith('18:30')) gunlukRapor()
 }
 
