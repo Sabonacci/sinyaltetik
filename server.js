@@ -279,7 +279,7 @@ async function sinyalKontrol(sembol, veri, para, xu100Yukseliyor = true) {
   }
 
   // Kesin AL: buySignal + wtCrossedRecently + trend2 == 1 + xu100 yükseliyor
-  const kesinAl = buySignal && wtCrossedRecently && trend2Son === 1 && xu100Yukseliyor
+  const kesinAl = buySignal && wtCrossedRecently && trend2Son === 1
 
   // Kesin SAT: pozisyon açık + fiyat TP seviyesine ulaştı
   const kesinSat = d.lastSignal === 1 && d.tpLevel !== null && closeSon >= d.tpLevel
