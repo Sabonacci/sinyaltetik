@@ -1,12 +1,12 @@
-const axios = require('axios')
-const express = require('express')
+const axios = require("axios")
+const express = require("express")
 
 const {
   RSI,
   PSAR,
   StochasticRSI,
   WMA
-} = require('technicalindicators')
+} = require("technicalindicators")
 
 const app = express()
 
@@ -14,313 +14,240 @@ const app = express()
 // ENV
 // ─────────────────────────────
 
-const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
-const TELEGRAM_CHAT_ID = '-1003975259428'
+const TOKEN = process.env.8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js
+const CHAT  = process.env.-1003975259428
 
 // ─────────────────────────────
-// WATCHLIST
+// LIST
 // ─────────────────────────────
 
-const HISSELER = [
-  'THYAO.IS','ASELS.IS','TUPRS.IS','SASA.IS','ASTOR.IS',
-  'YEOTK.IS','GESAN.IS','EUPWR.IS','LOGO.IS'
-]
+const HISSELER = ["THYAO.IS","ASELS.IS","TUPRS.IS","SASA.IS"]
+const COINLER  = ["BTC-USD","ETH-USD","SOL-USD"]
 
-const COINLER = [
-  'BTC-USD','ETH-USD','SOL-USD','XRP-USD','ADA-USD'
-]
-
-// tekrar sinyal engeli
-const lastSignalPrice = {}
+const lastSignal = {}
 
 // ─────────────────────────────
 // TELEGRAM
 // ─────────────────────────────
 
-async function sendTelegram(msg) {
-  try {
-    await axios.post(
-      `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
-      {
-        chat_id: TELEGRAM_CHAT_ID,
-        text: msg,
-        parse_mode: 'HTML'
-      }
-    )
-  } catch (e) {
-    console.log("Telegram hata:", e.message)
+async function tg(msg){
+  try{
+    await axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`,{
+      chat_id: CHAT,
+      text: msg,
+      parse_mode: "HTML"
+    })
+  }catch(e){
+    console.log("TG error:",e.message)
   }
 }
 
 // ─────────────────────────────
-// YAHOO 4H DATA
+// DATA
 // ─────────────────────────────
 
-async function fetchYahoo(symbol) {
-  try {
-    const url =
-      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=4h&range=3mo`
+async function fetch(symbol){
+  try{
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=4h&range=3mo`
 
-    const res = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
-    })
+    const r = await axios.get(url,{headers:{'User-Agent':'Mozilla'}})
 
-    const r = res.data.chart.result?.[0]
-    if (!r) return null
+    const q = r.data.chart.result?.[0]?.indicators?.quote?.[0]
+    if(!q) return null
 
-    const q = r.indicators.quote?.[0]
-    if (!q) return null
-
-    const data = q.close.map((c, i) => ({
-      close: q.close[i],
-      high: q.high[i],
-      low: q.low[i],
-      open: q.open[i],
-      volume: q.volume?.[i] || 0
-    })).filter(x =>
-      x.close !== null &&
-      x.high !== null &&
-      x.low !== null &&
-      x.open !== null
-    )
+    const data = q.close.map((c,i)=>({
+      c:q.close[i],
+      h:q.high[i],
+      l:q.low[i],
+      o:q.open[i]
+    })).filter(x=>x.c)
 
     return {
-      closes: data.map(x => Number(x.close)),
-      highs: data.map(x => Number(x.high)),
-      lows: data.map(x => Number(x.low)),
-      opens: data.map(x => Number(x.open)),
-      volumes: data.map(x => Number(x.volume))
+      c:data.map(x=>x.c),
+      h:data.map(x=>x.h),
+      l:data.map(x=>x.l),
+      o:data.map(x=>x.o)
     }
 
-  } catch (e) {
-    console.log(symbol, e.message)
+  }catch(e){
+    console.log(symbol,e.message)
     return null
   }
 }
 
 // ─────────────────────────────
-// HULL MA
+// HULL
 // ─────────────────────────────
 
-function hullMA(values, period = 9) {
-  const half = Math.floor(period / 2)
-  const sqrt = Math.floor(Math.sqrt(period))
+function hull(values, p=9){
+  const half = Math.floor(p/2)
+  const sqrt = Math.floor(Math.sqrt(p))
 
-  const wmaHalf = WMA.calculate({ period: half, values })
-  const wmaFull = WMA.calculate({ period, values })
+  const w1 = WMA.calculate({values,period:half})
+  const w2 = WMA.calculate({values,period:p})
 
-  const diff = []
+  const diff=[]
+  const off = w1.length-w2.length
 
-  const offset = wmaHalf.length - wmaFull.length
-
-  for (let i = 0; i < wmaFull.length; i++) {
-    diff.push(2 * wmaHalf[i + offset] - wmaFull[i])
+  for(let i=0;i<w2.length;i++){
+    diff.push(2*w1[i+off]-w2[i])
   }
 
-  return WMA.calculate({ period: sqrt, values: diff })
+  return WMA.calculate({values:diff,period:sqrt})
 }
 
 // ─────────────────────────────
-// CMF
+// DEBUG ANALYSIS ENGINE
 // ─────────────────────────────
 
-function cmf(highs, lows, closes, volumes, period = 20) {
-  const result = []
+function analyze(symbol,data){
 
-  for (let i = period; i < closes.length; i++) {
-    let mfvSum = 0
-    let volSum = 0
+  const c=data.c, h=data.h, l=data.l
+  const n=c.length-1
 
-    for (let j = i - period; j < i; j++) {
-      const high = highs[j]
-      const low = lows[j]
-      const close = closes[j]
-      const vol = volumes[j]
-
-      const mfm = ((close - low) - (high - close)) / (high - low || 1)
-      const mfv = mfm * vol
-
-      mfvSum += mfv
-      volSum += vol
-    }
-
-    result.push(volSum === 0 ? 0 : mfvSum / volSum)
-  }
-
-  return result
-}
-
-// ─────────────────────────────
-// ICHIMOKU BASE
-// ─────────────────────────────
-
-function ichimokuBase(highs, lows, period = 26) {
-  const res = []
-
-  for (let i = period; i < highs.length; i++) {
-    const h = Math.max(...highs.slice(i - period, i))
-    const l = Math.min(...lows.slice(i - period, i))
-    res.push((h + l) / 2)
-  }
-
-  return res
-}
-
-// ─────────────────────────────
-// PIVOT
-// ─────────────────────────────
-
-function pivot(high, low, close) {
-  return (high + low + close) / 3
-}
-
-// ─────────────────────────────
-// MAIN SIGNAL
-// ─────────────────────────────
-
-async function sinyal(symbol, data, para) {
-  if (!data) return
-  if (data.closes.length < 50) return
-
-  const n = data.closes.length - 1
-
-  const close = data.closes[n]
-  const open = data.opens[n]
-  const high = data.highs[n]
-  const low = data.lows[n]
+  const close=c[n]
+  const open=c[n-1]
 
   // RSI
-  const rsi14 = RSI.calculate({ values: data.closes, period: 14 }).at(-1)
-  const rsi7  = RSI.calculate({ values: data.closes, period: 7 }).at(-1)
+  const rsi14 = RSI.calculate({values:c,period:14}).at(-1)
+  const rsi7  = RSI.calculate({values:c,period:7}).at(-1)
 
   // SAR
-  const sar = PSAR.calculate({
-    high: data.highs,
-    low: data.lows,
-    step: 0.02,
-    max: 0.2
-  }).at(-1)
+  const sar = PSAR.calculate({high:h,low:l,step:0.02,max:0.2}).at(-1)
 
-  // CMF
-  const cmfVal = cmf(
-    data.highs,
-    data.lows,
-    data.closes,
-    data.volumes,
-    20
-  ).at(-1)
+  // CMF (basit debug)
+  let cmf=0
+  let volOK=true
 
   // Hull
-  const hull = hullMA(data.closes, 9).at(-1)
+  const hullVal = hull(c,9).at(-1)
 
-  // Stoch RSI
-  const stoch = StochasticRSI.calculate({
-    values: data.closes,
-    rsiPeriod: 14,
-    stochasticPeriod: 14,
-    kPeriod: 3,
-    dPeriod: 3
+  // Stoch
+  const st = StochasticRSI.calculate({
+    values:c,
+    rsiPeriod:14,
+    stochasticPeriod:14,
+    kPeriod:3,
+    dPeriod:3
   }).at(-1)
 
-  const k = stoch?.k
-  const d = stoch?.d
+  const k=st?.k
+  const d=st?.d
 
-  // Ichimoku
-  const kijun = ichimokuBase(data.highs, data.lows, 26).at(-1)
+  // Ichimoku base (basit)
+  const kijun = (Math.max(...h.slice(-26)) + Math.min(...l.slice(-26)))/2
 
   // Pivot
-  const pivotVal = pivot(
-    data.highs[n - 1],
-    data.lows[n - 1],
-    data.closes[n - 1]
-  )
+  const pivot = (h[n-1]+l[n-1]+c[n-1])/3
 
-  // ─────────────────────────────
-  // ŞARTLAR
-  // ─────────────────────────────
+  // ───────── SCORE SYSTEM ─────────
 
-  const signal =
-    rsi14 >= 45 && rsi14 <= 65 &&
-    rsi7 <= 70 &&
-    sar < close &&
-    cmfVal >= -0.2 && cmfVal <= 0.3 &&
-    hull < close &&
-    close > open &&
-    k > d &&
-    kijun < close &&
-    pivotVal < close
+  let score=0
+  let debug=[]
 
-  if (!signal) return
+  function check(name,cond){
+    if(cond){
+      score++
+      debug.push("🟢 "+name)
+    }else{
+      debug.push("🔴 "+name)
+    }
+  }
 
-  // tekrar sinyal engeli
-  if (lastSignalPrice[symbol] === close) return
-  lastSignalPrice[symbol] = close
+  check("RSI14 45-65", rsi14>=45 && rsi14<=65)
+  check("RSI7 <=70", rsi7<=70)
+  check("SAR below", sar<close)
+  check("Hull below price", hullVal<close)
+  check("Green candle", close>open)
+  check("Stoch K>D", k>d)
+  check("Ichimoku bullish", kijun<close)
+  check("Pivot above", pivot<close)
 
-  const name = symbol.replace('.IS', '').replace('-USD', '')
+  const signal = score>=7
 
-  const msg = `
-🟢 <b>4H STRONG BUY</b>
+  return {
+    signal,
+    score,
+    debug,
+    rsi14,
+    rsi7,
+    sar,
+    hullVal,
+    k,
+    d,
+    kijun,
+    pivot,
+    close
+  }
+}
 
-📊 ${name}
+// ─────────────────────────────
+// MAIN
+// ─────────────────────────────
 
-💰 Fiyat: ${close.toFixed(4)} ${para}
+async function run(){
 
-📈 RSI14: ${rsi14.toFixed(2)}
-⚡ RSI7: ${rsi7.toFixed(2)}
-💵 CMF: ${cmfVal.toFixed(3)}
+  console.log("DEBUG RUN")
 
-📊 Stoch RSI: K > D
-☁️ Ichimoku: OK
-📌 Pivot üstü
-📉 Hull altı kırıldı
-🟢 SAR destek
+  for(const s of [...HISSELER,...COINLER]){
 
-🕐 ${new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}
+    const data = await fetch(s)
+    if(!data) continue
+
+    const a = analyze(s,data)
+
+    const name=s.replace(".IS","").replace("-USD","")
+
+    console.log(name,a.score)
+
+    // TELEGRAM DEBUG RAPOR
+    await tg(
 `
+📊 <b>${name}</b>
 
-  await sendTelegram(msg)
+💰 ${a.close}
 
-  console.log("AL:", name)
+📈 RSI14: ${a.rsi14?.toFixed(2)}
+⚡ RSI7: ${a.rsi7?.toFixed(2)}
+📉 SAR: ${a.sar}
+📊 Hull: ${a.hullVal}
+☁️ Ichimoku: ${a.kijun?.toFixed(2)}
+📌 Pivot: ${a.pivot?.toFixed(2)}
+
+━━━━━━━━━━
+⭐ SCORE: ${a.score}/8
+
+${a.debug.join("\n")}
+
+━━━━━━━━━━
+${a.signal ? "🟢 STRONG BUY" : "⚪ NO SIGNAL"}
+`
+    )
+
+    // sadece güçlü sinyal
+    if(a.signal && lastSignal[s]!==a.close){
+      lastSignal[s]=a.close
+
+      await tg(`🚀 <b>AL SİNYALİ</b>\n${name}\nFiyat: ${a.close}`)
+    }
+  }
 }
 
 // ─────────────────────────────
 // LOOP
 // ─────────────────────────────
 
-async function run() {
-  console.log("tarama başladı")
+app.get("/",(r,res)=>res.send("DEBUG BOT OK"))
 
-  for (const s of HISSELER) {
-    const d = await fetchYahoo(s)
-    await sinyal(s, d, "₺")
-  }
-
-  for (const s of COINLER) {
-    const d = await fetchYahoo(s)
-    await sinyal(s, d, "$")
-  }
-
-  console.log("tarama bitti")
-}
-
-// ─────────────────────────────
-// EXPRESS
-// ─────────────────────────────
-
-app.get("/", (req, res) => {
-  res.send("Bot OK")
-})
-
-app.get("/test", async (req, res) => {
-  await sendTelegram("TEST OK")
+app.get("/test",async(r,res)=>{
+  await tg("TEST OK")
   res.send("ok")
 })
 
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT||3000
 
-app.listen(PORT, () => {
-  console.log("server başladı", PORT)
-
+app.listen(PORT,()=>{
+  console.log("START",PORT)
   run()
-  setInterval(run, 15 * 60 * 1000)
+  setInterval(run,15*60*1000)
 })
