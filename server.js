@@ -14,8 +14,8 @@ const app = express()
 // ENV
 // ─────────────────────────────
 
-const TOKEN = process.env.8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js
-const CHAT  = process.env.-1003975259428
+const TOKEN = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
+const CHAT  = '-1003975259428'
 
 // ─────────────────────────────
 // LIST
