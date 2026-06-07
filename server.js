@@ -21,6 +21,18 @@ const COINLER = [
 ]
 
 /* =========================
+   GLOBAL STATE
+========================= */
+
+const state = {
+  logs: [],
+  apiLatency: {},
+  riskOff: false,
+  activeSymbol: null,
+  trades: []
+}
+
+/* =========================
    DURUM
 ========================= */
 
@@ -38,7 +50,35 @@ const durum = {}
 })
 
 /* =========================
-   XU100 RETURN
+   LOG SYSTEM
+========================= */
+
+function log(event){
+  state.logs.push({
+    time: new Date().toISOString(),
+    ...event
+  })
+
+  if(state.logs.length > 200){
+    state.logs.shift()
+  }
+}
+
+/* =========================
+   LATENCY WRAPPER
+========================= */
+
+async function timed(name, fn){
+  const t0 = Date.now()
+  const r = await fn()
+  const t1 = Date.now()
+
+  state.apiLatency[name] = t1 - t0
+  return r
+}
+
+/* =========================
+   XU RETURN
 ========================= */
 
 function xuReturn(x){
@@ -51,17 +91,17 @@ function xuReturn(x){
    MARKET BREADTH
 ========================= */
 
-function breadth(returns){
-  const pos = returns.filter(r=>r>0).length
-  return pos / returns.length
+function breadth(arr){
+  const pos = arr.filter(x=>x>0).length
+  return pos / arr.length
 }
 
 /* =========================
    CRASH FILTER
 ========================= */
 
-function crash(xu,breadth){
-  return xu < -1.2 && breadth < 0.35
+function crash(xu, br){
+  return xu < -1.2 && br < 0.35
 }
 
 /* =========================
@@ -107,6 +147,16 @@ async function send(msg){
 }
 
 /* =========================
+   WINRATE
+========================= */
+
+function winrate(){
+  if(!state.trades.length) return 0
+  const wins = state.trades.filter(t=>t.pct>0).length
+  return (wins/state.trades.length)*100
+}
+
+/* =========================
    SİNYAL MOTORU
 ========================= */
 
@@ -114,24 +164,31 @@ async function signal(symbol,data,xuOk,riskOff){
 
   if(!data || data.closes.length<20) return
 
-  const d=durum[symbol]
-  const c=data.closes
-  const n=c.length-1
-  const price=c[n]
+  const d = durum[symbol]
+  const c = data.closes
+  const n = c.length-1
+  const price = c[n]
+
+  state.activeSymbol = symbol
 
   /* =====================
      RISK OFF MODE
   ===================== */
   if(riskOff){
+    state.riskOff = true
+
     if(d.lastSignal===1){
       d.lastSignal=0
+      log({type:'risk_exit',symbol})
       await send(`⚠️ RISK OFF EXIT ${symbol}`)
     }
     return
   }
 
+  state.riskOff = false
+
   /* =====================
-     BUY SIGNAL
+     BUY
   ===================== */
 
   const buy =
@@ -147,6 +204,8 @@ async function signal(symbol,data,xuOk,riskOff){
     d.peak=price
     d.trail=price*0.993
 
+    log({type:'buy',symbol,price})
+
     await send(`🟢 AL ${symbol} ${price}`)
   }
 
@@ -155,27 +214,40 @@ async function signal(symbol,data,xuOk,riskOff){
   ===================== */
 
   if(d.lastSignal===1){
-    if(price > d.peak){
-      d.peak = price
-      d.trail = price*0.993
+    if(price>d.peak){
+      d.peak=price
+      d.trail=price*0.993
     }
   }
 
   /* =====================
-     EXIT RULES
+     SELL
   ===================== */
 
   const sell =
     d.lastSignal===1 &&
     (
-      price >= d.tp ||
-      price <= d.sl ||
-      price <= d.trail
+      price>=d.tp ||
+      price<=d.sl ||
+      price<=d.trail
     )
 
   if(sell){
+
+    const pct = ((price-d.alPrice)/d.alPrice)*100
+
+    state.trades.push({
+      symbol,
+      entry:d.alPrice,
+      exit:price,
+      pct
+    })
+
+    log({type:'sell',symbol,pct})
+
     d.lastSignal=0
-    await send(`🔴 SAT ${symbol} ${price}`)
+
+    await send(`🔴 SAT ${symbol} %${pct.toFixed(2)}`)
   }
 }
 
@@ -185,11 +257,13 @@ async function signal(symbol,data,xuOk,riskOff){
 
 async function loop(){
 
-  const xu = await yahoo('XU100.IS')
+  const xu = await timed("yahoo_xu", ()=>yahoo('XU100.IS'))
 
   const xuR = xuReturn(xu)
 
-  const data = await Promise.all(HISSELER.map(yahoo))
+  const data = await Promise.all(
+    HISSELER.map(s => timed(`yahoo_${s}`, ()=>yahoo(s)))
+  )
 
   const rets = data.map(d=>{
     if(!d) return 0
@@ -207,12 +281,63 @@ async function loop(){
     HISSELER.map((s,i)=>signal(s,data[i],xuOk,riskOff))
   )
 
-  console.log({
-    xuR,
-    br,
-    riskOff
-  })
+  log({type:'tick',xuR,br,riskOff})
 }
+
+/* =========================
+   DASHBOARD API
+========================= */
+
+app.get('/dashboard',(req,res)=>{
+
+  res.json({
+    riskOff: state.riskOff,
+    activeSymbol: state.activeSymbol,
+    latency: state.apiLatency,
+    winrate: winrate().toFixed(2),
+    trades: state.trades.length,
+    logs: state.logs.slice(-20)
+  })
+})
+
+/* =========================
+   UI PANEL
+========================= */
+
+app.get('/panel',(req,res)=>{
+
+  res.send(`
+  <html>
+  <body style="background:#0d1117;color:white;font-family:Arial">
+    <h2>🚀 Trading Dashboard</h2>
+
+    <pre id="a"></pre>
+    <pre id="b"></pre>
+
+    <script>
+      async function load(){
+        const r = await fetch('/dashboard')
+        const d = await r.json()
+
+        document.getElementById('a').innerText =
+        JSON.stringify({
+          riskOff:d.riskOff,
+          active:d.activeSymbol,
+          winrate:d.winrate,
+          trades:d.trades
+        },null,2)
+
+        document.getElementById('b').innerText =
+        JSON.stringify(d.latency,null,2)
+      }
+
+      setInterval(load,2000)
+      load()
+    </script>
+  </body>
+  </html>
+  `)
+})
 
 /* =========================
    SERVER
