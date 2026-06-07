@@ -18,9 +18,7 @@ const HISSELER = [
 ]
 
 const COINLER = [
-  'BTCUSDT','XRPUSDT','DASHUSDT','SOLUSDT',
-  'EIGENUSDT','ADAUSDT','ETHUSDT','ETHFIUSDT',
-  'MATICUSDT'
+  'BTCUSDT'
 ]
 
 const DOSYA = '/tmp/islemler.json'
