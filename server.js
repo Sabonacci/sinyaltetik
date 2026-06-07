@@ -4,7 +4,7 @@ const fs      = require('fs')
 const app     = express()
 
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
-const TELEGRAM_CHAT_ID = '8557325295'
+const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
   'THYAO.IS','GLRMK.IS','ALBRK.IS','TUPRS.IS','ASTOR.IS',
