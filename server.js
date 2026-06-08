@@ -16,7 +16,7 @@ const HISSELER = [
   'KRSTL','ORGE','TCKRC','LYDHO','DUNYH',
   'BIGTK','TGSAS','BINHO','TEHOL','TRHOL',
   'MANAS','FMIZP','PSDTC','HUBVC','IHAAS',
-  'EUREN','TNZTP','ARDYZ','LOGO','LINK'
+  'EUREN','TNZTP','ARDYZ','LOGO','AHGAZ'
 ]
 
 // ── Matematiksel İndikatör Hesaplamaları (Yerel İşlemci) ──────────────────────
