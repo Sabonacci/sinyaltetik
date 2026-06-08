@@ -13,6 +13,7 @@ const HISSELER = [
   'KRSTL.IS','ORGE.IS','TCKRC.IS','LYDHO.IS','DUNYH.IS',
   'BIGTK.IS','TGSAS.IS','BINHO.IS','TEHOL.IS','TRHOL.IS',
   'MANAS.IS','FMIZP.IS','PSDTC.IS','HUBVC.IS','IHAAS.IS',
+  'AHGAZ.IS','ATATR.IS','FRMPL.IS','BESTE','ULUSE.IS',
   'EUREN.IS','TNZTP.IS','ARDYZ.IS','LOGO.IS','LINK.IS'
 ]
 
@@ -184,7 +185,6 @@ function calcKijun(highs, lows, period = 26) {
 // ── Klasik Pivot Point ────────────────────────────────────────────────────────
 
 function calcPivot(highs, lows, closes) {
-  // Bir önceki günün H/L/C ile pivot hesabı (son bar hariç bir önceki)
   const n = closes.length
   if (n < 2) return NaN
   const h = Math.max(...highs.slice(0, n - 1))
@@ -197,7 +197,6 @@ function calcPivot(highs, lows, closes) {
 
 async function fetchYahoo(symbol) {
   try {
-    // interval=1d (günlük) ve indikatörlerin dolması için 3 aylık veri (range=3mo) çekiyoruz
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=3mo`
     const res = await axios.get(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
@@ -225,7 +224,7 @@ async function fetchYahoo(symbol) {
   }
 }
 
-// ── Telegram ──────────────────────────────────────────────────────────────────
+// ── Telegram Mesaj Gönderme ───────────────────────────────────────────────────
 
 async function sendTelegram(msg) {
   try {
@@ -253,7 +252,7 @@ async function taramaYap(sembol) {
 
   const sonuclar = {}
 
-  // ── 1. RSI(14) → 45-65 aralığı ──────────────────────────────────────────
+  // 1. RSI(14) → 45-65 aralığı
   const rsi14 = calcRSI(closes, 14)
   const rsi14Son = rsi14[rsi14.length - 1]
   sonuclar.rsi14 = {
@@ -262,7 +261,7 @@ async function taramaYap(sembol) {
     etiket: `RSI(14): ${isNaN(rsi14Son) ? '-' : rsi14Son.toFixed(1)}`
   }
 
-  // ── 2. RSI(7) → max 70 ──────────────────────────────────────────────────
+  // 2. RSI(7) → max 70
   const rsi7  = calcRSI(closes, 7)
   const rsi7Son = rsi7[rsi7.length - 1]
   sonuclar.rsi7 = {
@@ -271,7 +270,7 @@ async function taramaYap(sembol) {
     etiket: `RSI(7): ${isNaN(rsi7Son) ? '-' : rsi7Son.toFixed(1)}`
   }
 
-  // ── 3. Parabolic SAR → fiyatın altında ──────────────────────────────────
+  // 3. Parabolic SAR → fiyatın altında
   const sar    = calcParabolicSAR(highs, lows, closes)
   const sarSon = sar[n]
   sonuclar.sar = {
@@ -280,7 +279,7 @@ async function taramaYap(sembol) {
     etiket: `SAR: ${sarSon.toFixed(4)}`
   }
 
-  // ── 4. CMF(20) → -0.2 ile 0.3 arasında ─────────────────────────────────
+  // 4. CMF(20) → -0.2 ile 0.3 arasında
   const cmf    = calcCMF(highs, lows, closes, volumes, 20)
   const cmfSon = cmf[n]
   sonuclar.cmf = {
@@ -289,7 +288,7 @@ async function taramaYap(sembol) {
     etiket: `CMF(20): ${isNaN(cmfSon) ? '-' : cmfSon.toFixed(3)}`
   }
 
-  // ── 5. Hull MA(9) → fiyatın altında ─────────────────────────────────────
+  // 5. Hull MA(9) → fiyatın altında
   const hma    = calcHullMA(closes, 9)
   const hmaSon = hma[hma.length - 1]
   sonuclar.hma = {
@@ -298,14 +297,14 @@ async function taramaYap(sembol) {
     etiket: `HMA(9): ${isNaN(hmaSon) ? '-' : hmaSon.toFixed(4)}`
   }
 
-  // ── 6. Fiyat > Açılış ────────────────────────────────────────────────────
+  // 6. Fiyat > Açılış
   sonuclar.fiyatAcilis = {
     deger: fiyat - acilis,
     gecti: fiyat > acilis,
     etiket: `Fiyat: ${fiyat.toFixed(4)} > Açılış: ${acilis.toFixed(4)}`
   }
 
-  // ── 7. Stochastic RSI K > D ──────────────────────────────────────────────
+  // 7. Stochastic RSI K > D
   const stochRsi = calcStochRSI(closes, 14, 14, 3, 3)
   const kSon = stochRsi.k[stochRsi.k.length - 1]
   const dSon = stochRsi.d[stochRsi.d.length - 1]
@@ -315,7 +314,7 @@ async function taramaYap(sembol) {
     etiket: `StochRSI K: ${isNaN(kSon) ? '-' : kSon.toFixed(1)} / D: ${isNaN(dSon) ? '-' : dSon.toFixed(1)}`
   }
 
-  // ── 8. İchimoku Base Line (Kijun) < Fiyat ────────────────────────────────
+  // 8. İchimoku Base Line (Kijun) < Fiyat
   const kijun    = calcKijun(highs, lows, 26)
   const kijunSon = kijun[n]
   sonuclar.kijun = {
@@ -324,7 +323,7 @@ async function taramaYap(sembol) {
     etiket: `Kijun: ${isNaN(kijunSon) ? '-' : kijunSon.toFixed(4)}`
   }
 
-  // ── 9. Pivot < Fiyat ─────────────────────────────────────────────────────
+  // 9. Pivot < Fiyat
   const pivot = calcPivot(highs, lows, closes)
   sonuclar.pivot = {
     deger: pivot,
@@ -371,7 +370,7 @@ async function taramaBaslat() {
   console.log(`[${new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' })}] Tarama bitti. ${bulunanlar.length} hisse bulundu.`)
 
   if (bulunanlar.length === 0) {
-    console.log('Kriterleri karşılayan hisse bulunamadı.')
+    await sendTelegram(`🔍 <b>TARAMA SONUCU — ${tarih}</b>\n🕐 ${saat} | Günlük (1D)\n━━━━━━━━━━━━━━━━━━━━\n❌ Kriterleri karşılayan hiçbir hisse bulunamadı.`)
     return
   }
 
@@ -415,7 +414,42 @@ function borsaAcikMi() {
   return dakika >= 9 * 60 + 30 && dakika <= 18 * 60 + 30
 }
 
-// ── Sunucu ────────────────────────────────────────────────────────────────────
+// ── Telegram'dan Gelen Komutları Dinleme (Long Polling) ──────────────────────
+
+let lastUpdateId = 0;
+
+async function telegramDinle() {
+  try {
+    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`;
+    const res = await axios.get(url, { timeout: 35000 });
+    
+    if (res.data && res.data.result.length > 0) {
+      for (const update of res.data.result) {
+        lastUpdateId = update.update_id;
+
+        if (update.message && update.message.text) {
+          const mesajMetni = update.message.text.trim();
+          const gelenChatId = update.message.chat.id.toString();
+
+          // Sadece tanımladığın TELEGRAM_CHAT_ID üzerinden gelen komutu dinler
+          if (mesajMetni === '/tara' && gelenChatId === TELEGRAM_CHAT_ID) {
+            await sendTelegram('⏳ <b>Manuel tarama isteği alındı.</b> Günlük canlı veriler analiz ediliyor, lütfen bekleyin...');
+            await taramaBaslat();
+          }
+        }
+      }
+    }
+  } catch (err) {
+    if (err.code !== 'ECONNABORTED') {
+      console.error('Telegram dinleme hatası:', err.message);
+    }
+  }
+  
+  // Sürekli dinleme döngüsü
+  setTimeout(telegramDinle, 1000);
+}
+
+// ── Express Sunucu ve Zamanlayıcı Başlatma ────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Tarama botu çalışıyor ✅'))
 
@@ -433,16 +467,19 @@ app.listen(3000, () => {
   console.log('Tarama botu başladı ✅')
   console.log('Kriterler (1D): RSI14(45-65) | RSI7(≤70) | SAR(altında) | CMF(-0.2/0.3) | HMA(altında) | Fiyat>Açılış | StochRSI K>D | Kijun<Fiyat | Pivot<Fiyat')
 
-  // İlk çalışma
+  // Telegram bot komut dinleyicisini başlatıyoruz
+  telegramDinle();
+
+  // İlk açılışta borsa açıksa otomatik tarama yapar
   if (borsaAcikMi()) taramaBaslat()
 
-  // 15 dakikada bir tekrarlanan tetikleyici
+  // Her 15 dakikada bir otomatik kontrol
   setInterval(() => {
     if (borsaAcikMi()) {
       taramaBaslat()
     } else {
       const saat = new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' })
-      console.log(`[${saat}] Borsa kapalı, tarama atlandı.`);
+      console.log(`[${saat}] Borsa kapalı, otomatik tarama atlandı. (Telegram /tara komutu yine de çalışır)`)
     }
   }, 15 * 60 * 1000)
 })
