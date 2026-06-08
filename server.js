@@ -15,45 +15,47 @@ async function tradingViewTarama() {
       symbols: { query: { types: [] }, tickers: [] },
       options: { lang: 'tr' },
       columns: [
-        'name',               // d[0]
-        'close',              // d[1]
-        'RSI',                // d[2]
-        'RSI7',               // d[3]
-        'P.SAR',              // d[4]
-        'ChaikinMoneyFlow',   // d[5]
-        'HullMA9',            // d[6]
-        'open',               // d[7]
-        'Stoch.RSI.K',        // d[8]
-        'Stoch.RSI.D',        // d[9]
-        'Ichimoku.BLine',     // d[10]
-        'Pivot.M.Classic.Pivot' // d[11] -> Günlük ana pivot seviyesi
+        'name',                  // d[0] -> Hisse Kodu
+        'close',                 // d[1] -> Canlı Fiyat
+        'RSI',                   // d[2] -> RSI (14)
+        'RSI7',                  // d[3] -> RSI (7)
+        'P.SAR',                 // d[4] -> Parabolic SAR
+        'ChaikinMoneyFlow',      // d[5] -> CMF (20)
+        'HullMA9',               // d[6] -> Hull HO (9)
+        'open',                  // d[7] -> Açılış
+        'Stoch.RSI.K',           // d[8] -> Stokastik RSI K
+        'Stoch.RSI.D',           // d[9] -> Stokastik RSI D
+        'Ichimoku.KijunSen',     // d[10] -> Ichimoku Base Line (Kijun-sen)
+        'Pivot.D.Classic.Pivot'  // d[11] -> Klasik Günlük Pivot (P)
       ],
       filter: [
         { left: 'RSI', operation: 'in_range', right: [45, 65] },
-        { left: 'RSI7', operation: 'less_or_equal', right: 70 },
+        { left: 'RSI7', operation: 'less', right: 70 },
         { left: 'P.SAR', operation: 'below', right: 'close' },
         { left: 'ChaikinMoneyFlow', operation: 'in_range', right: [-0.2, 0.3] },
         { left: 'HullMA9', operation: 'below', right: 'close' },
         { left: 'close', operation: 'greater', right: 'open' },
         { left: 'Stoch.RSI.K', operation: 'greater', right: 'Stoch.RSI.D' },
-        { left: 'Ichimoku.BLine', operation: 'below', right: 'close' },
-        { left: 'Pivot.M.Classic.Pivot', operation: 'below', right: 'close' } // Pivot < Fiyat filtresini TV sunucusuna taşıdık
+        { left: 'Ichimoku.KijunSen', operation: 'below', right: 'close' },
+        { left: 'Pivot.D.Classic.Pivot', operation: 'below', right: 'close' }
       ],
       sort: { sortBy: 'name', sortOrder: 'asc' },
-      range: [0, 1000] // Garanti olsun diye BIST'teki tüm hisse ve endeksleri (1000 limit) kapsama alıyoruz
+      range: [0, 1000] // Tüm BIST hisselerini (BIST TÜM) kapsar
     }
 
     const res = await axios.post(url, payload, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+      },
       timeout: 15000
     })
 
     if (!res.data || !res.data.data) return []
 
-    // Gelen veriyi eşleme
+    // Gelen verileri filtreleyerek objeye dönüştür
     return res.data.data.map(h => {
-      // Eğer zorunlu alanlardan biri boş geldiyse bu hisseyi atla (Çökmeyi önler)
-      if (h.d[1] === null || h.d[2] === null) return null;
+      // Temel fiyat veya isim verisi boşsa atla
+      if (!h.d || h.d[0] === null || h.d[1] === null) return null
 
       return {
         sembol: h.d[0],
