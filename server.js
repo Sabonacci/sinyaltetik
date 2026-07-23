@@ -333,8 +333,8 @@ async function sinyalKontrol(sembol) {
         `✅ <b>RSI (7):</b> ${a.rsi7.val.toFixed(1)}\n` +
         `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (< Fiyat)\n` +
         `✅ <b>CMF (20):</b> ${a.cmf20.val.toFixed(3)}\n` +
-        `✅ <b>Hull MA (9):</b> ${typeof a.hma9.val === 'number' ? a.hma9.val.toFixed(2) : '-'}\n` +
-        `✅ <b>Stoch RSI:</b> K (${a.stochRsi.kSon.toFixed(1)}) ▲ D (${a.stochRsi.dSon.toFixed(1)})\n` +
+        `✅ <b>Hull MA (9):</b> ${typeof a.hma9 === 'number' ? a.hma9.toFixed(2) : '-'}\n` +
+        `✅ <b>Stoch RSI:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
         `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val.toFixed(2)}\n` +
         `✅ <b>Pivot:</b> ${a.pivot.val.toFixed(2)}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
