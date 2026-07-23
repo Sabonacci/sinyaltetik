@@ -3,13 +3,13 @@ const express = require('express')
 const fs      = require('fs')
 const app     = express()
 
-// Telegram'dan gelen JSON paketlerini okuyabilmek için EN ÜSTTE olması şarttır
+// Telegram'dan gelen Webhook isteklerini (JSON) okuyabilmek için şarttır
 app.use(express.json())
 
-const TELEGRAM_TOKEN    = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
+const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
-// Takip edilecek hisseler
+// Sadece istenen 3 hisse
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS'
 ]
@@ -72,10 +72,15 @@ function wmaArr(arr, len) {
   const norm = (len * (len + 1)) / 2
   for (let i = len - 1; i < arr.length; i++) {
     let sum = 0
+    let hasNull = false
     for (let j = 0; j < len; j++) {
+      if (arr[i - j] === null || arr[i - j] === undefined) {
+        hasNull = true
+        break
+      }
       sum += arr[i - j] * (len - j)
     }
-    result[i] = sum / norm
+    result[i] = hasNull ? null : sum / norm
   }
   return result
 }
@@ -92,18 +97,7 @@ function hmaArr(arr, len) {
     return 2 * wmaHalf[i] - wmaFull[i]
   })
 
-  const validRaw = rawHma.filter(v => v !== null)
-  const calculatedWma = wmaArr(validRaw, sqrtLen)
-  
-  const finalHma = new Array(arr.length).fill(null)
-  let valIdx = 0
-  for (let i = 0; i < arr.length; i++) {
-    if (rawHma[i] !== null) {
-      finalHma[i] = calculatedWma[valIdx]
-      valIdx++
-    }
-  }
-  return finalHma
+  return wmaArr(rawHma, sqrtLen)
 }
 
 function smaArr(arr, len) {
@@ -297,7 +291,7 @@ async function hisseAnaliziGetir(sembol) {
   const c2 = rsi7 <= 70
   const c3 = sar < f
   const c4 = cmf20 >= 0.01 && cmf20 <= 0.3
-  const c5 = hma9 !== null && hma9 < f
+  const c5 = typeof hma9 === 'number' && hma9 < f
   const c6 = f > o
   const c7 = (kPrev <= dPrev) && (kSon > dSon)
   const c8 = baseLine < f
@@ -320,7 +314,7 @@ async function hisseAnaliziGetir(sembol) {
   }
 }
 
-// ── Otomatik Sinyal Motoru ───────────────────────────────────────────────────
+// ── Sinyal Motoru ─────────────────────────────────────────────────────────────
 
 async function sinyalKontrol(sembol) {
   const a = await hisseAnaliziGetir(sembol)
@@ -339,7 +333,7 @@ async function sinyalKontrol(sembol) {
         `✅ <b>RSI (7):</b> ${a.rsi7.val.toFixed(1)}\n` +
         `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (< Fiyat)\n` +
         `✅ <b>CMF (20):</b> ${a.cmf20.val.toFixed(3)}\n` +
-        `✅ <b>Hull MA (9):</b> ${a.hma9 ? a.hma9.toFixed(2) : '-'}\n` +
+        `✅ <b>Hull MA (9):</b> ${typeof a.hma9.val === 'number' ? a.hma9.val.toFixed(2) : '-'}\n` +
         `✅ <b>Stoch RSI:</b> K (${a.stochRsi.kSon.toFixed(1)}) ▲ D (${a.stochRsi.dSon.toFixed(1)})\n` +
         `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val.toFixed(2)}\n` +
         `✅ <b>Pivot:</b> ${a.pivot.val.toFixed(2)}\n` +
@@ -367,7 +361,7 @@ async function kontrolEt() {
 
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
 
-// 📩 TELEGRAM'DAN GELEN MESAJLARI DİNLEYEN ROUTE
+// 📩 TELEGRAM'DAN GELEN "test" MESAJLARINI DİNLEYEN SİSTEM
 app.post('/webhook', async (req, res) => {
   try {
     const message = req.body?.message
@@ -387,16 +381,15 @@ app.post('/webhook', async (req, res) => {
           rapor += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val.toFixed(1)} (<=70)\n`
           rapor += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val.toFixed(2)} (< Fiyat)\n`
           rapor += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val.toFixed(3)} (0.01 - 0.30)\n`
-          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9 ? a.hma9.toFixed(2) : '-'} (< Fiyat)\n`
+          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${typeof a.hma9.val === 'number' ? a.hma9.val.toFixed(2) : '-'} (< Fiyat)\n`
           rapor += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat > Açılış\n`
-          rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stoch RSI: K(${a.stochRsi.kSon.toFixed(1)}) / D(${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
+          rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stoch RSI: K(${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
           rapor += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val.toFixed(2)} (< Fiyat)\n`
           rapor += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val.toFixed(2)} (< Fiyat)\n`
           rapor += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
           rapor += `━━━━━━━━━━━━━━━━━━━━\n`
         }
 
-        // Mesajı atan kişiye cevap gönder
         await sendTelegram(rapor, chatId)
       }
     }
