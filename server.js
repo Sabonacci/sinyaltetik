@@ -331,7 +331,7 @@ async function sinyalKontrol(sembol) {
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `✅ <b>RSI (14):</b> ${a.rsi14.val.toFixed(1)}\n` +
         `✅ <b>RSI (7):</b> ${a.rsi7.val.toFixed(1)}\n` +
-        `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (< Fiyat)\n` +
+        `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n` +
         `✅ <b>CMF (20):</b> ${a.cmf20.val.toFixed(3)}\n` +
         `✅ <b>Hull MA (9):</b> ${typeof a.hma9 === 'number' ? a.hma9.toFixed(2) : '-'}\n` +
         `✅ <b>Stoch RSI:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
@@ -378,14 +378,14 @@ app.post('/webhook', async (req, res) => {
 
           rapor += `📌 <b>${a.sembol}</b> — Fiyat: ${a.fiyat.toFixed(2)} | Açılış: ${a.acilis.toFixed(2)}\n`
           rapor += `${a.rsi14.ok ? '🟢' : '🔴'} RSI(14): ${a.rsi14.val.toFixed(1)} (45-65)\n`
-          rapor += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val.toFixed(1)} (<=70)\n`
-          rapor += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val.toFixed(2)} (< Fiyat)\n`
+          rapor += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val.toFixed(1)} (&lt;=70)\n`
+          rapor += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n`
           rapor += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val.toFixed(3)} (0.01 - 0.30)\n`
-          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${typeof a.hma9.val === 'number' ? a.hma9.val.toFixed(2) : '-'} (< Fiyat)\n`
-          rapor += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat > Açılış\n`
+          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${typeof a.hma9 === 'number' ? a.hma9.toFixed(2) : '-'} (&lt; Fiyat)\n`
+          rapor += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat &gt; Açılış\n`
           rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stoch RSI: K(${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
-          rapor += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val.toFixed(2)} (< Fiyat)\n`
-          rapor += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val.toFixed(2)} (< Fiyat)\n`
+          rapor += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val.toFixed(2)} (&lt; Fiyat)\n`
+          rapor += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val.toFixed(2)} (&lt; Fiyat)\n`
           rapor += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
           rapor += `━━━━━━━━━━━━━━━━━━━━\n`
         }
@@ -399,7 +399,6 @@ app.post('/webhook', async (req, res) => {
 
   res.sendStatus(200)
 })
-
 app.listen(3000, () => {
   console.log('Sunucu başladı')
   kontrolEt()
