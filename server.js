@@ -1,5 +1,6 @@
 const axios   = require('axios')
 const express = require('express')
+app.use(express.json())
 const fs      = require('fs')
 const app     = express()
 
@@ -404,4 +405,45 @@ app.listen(3000, () => {
   console.log('Sunucu başladı')
   kontrolEt()
   setInterval(kontrolEt, 60 * 1000)
+})
+// 📩 Telegram'dan Gelen Mesajları Dinleme (Webhook)
+app.post('/webhook', async (req, res) => {
+  try {
+    const message = req.body?.message
+    if (!message || !message.text) {
+      return res.sendStatus(200)
+    }
+
+    const gelenMetin = message.text.trim().toLowerCase()
+
+    // Eğer Telegram'dan "test" veya "/test" yazıldıysa
+    if (gelenMetin === 'test' || gelenMetin === '/test') {
+      let rapor = `🔍 <b>TELEGRAM TEST RAPORU</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
+
+      for (const sembol of HISSELER) {
+        const a = await hisseAnaliziGetir(sembol)
+        if (!a) continue
+
+        rapor += `📌 <b>${a.sembol}</b> — Fiyat: ${a.fiyat.toFixed(2)} | Açılış: ${a.acilis.toFixed(2)}\n`
+        rapor += `${a.rsi14.ok ? '🟢' : '🔴'} RSI(14): ${a.rsi14.val.toFixed(1)} (45-65)\n`
+        rapor += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val.toFixed(1)} (<=70)\n`
+        rapor += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val.toFixed(2)} (< Fiyat)\n`
+        rapor += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val.toFixed(3)} (0.01 - 0.30)\n`
+        rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9 ? a.hma9.toFixed(2) : '-'} (< Fiyat)\n`
+        rapor += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat > Açılış\n`
+        rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stoch RSI: K(${a.stochRsi.kSon.toFixed(1)}) / D(${a.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
+        rapor += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val.toFixed(2)} (< Fiyat)\n`
+        rapor += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val.toFixed(2)} (< Fiyat)\n`
+        rapor += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
+        rapor += `━━━━━━━━━━━━━━━━━━━━\n`
+      }
+
+      await sendTelegram(rapor)
+    }
+  } catch (err) {
+    console.error('Webhook işleme hatası:', err.message)
+  }
+
+  // Telegram sunucusuna isteğin ulaştığını bildirmek için 200 dönüyoruz
+  res.sendStatus(200)
 })
