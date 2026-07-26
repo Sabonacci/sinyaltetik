@@ -9,7 +9,7 @@ app.use(express.json())
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
-// Takip edilecek hisseler
+// Takip edilecek sabit hisseler (Otomatik sinyal motoru için)
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
@@ -32,9 +32,7 @@ var gunlukIslemler = islemleriYukle()
 
 const durum = {}
 HISSELER.forEach(h => {
-  durum[h] = {
-    lastSignalTime: 0
-  }
+  durum[h] = { lastSignalTime: 0 }
 })
 
 // ── İndikatör Hesaplama Fonksiyonları ───────────────────────────────────────
@@ -86,7 +84,6 @@ function wmaArr(arr, len) {
   return result
 }
 
-// Güvenli Hull MA (9)
 function hmaArr(closes, len = 9) {
   if (!closes || closes.length < len) return new Array(closes ? closes.length : 0).fill(null)
 
@@ -134,7 +131,6 @@ function smaArr(arr, len) {
   return result
 }
 
-// Klasik Stokastik (14, 1, 3) - TradingView Ekranıyla Birebir Uyumlu
 function stochArr(highs, lows, closes, period = 14, kSmooth = 1, dSmooth = 3) {
   const kRaw = new Array(closes.length).fill(null)
   
@@ -297,12 +293,9 @@ async function hisseAnaliziGetir(sembol) {
   const cmf20 = cmfArr(highs, lows, closes, vols, 20)[n]
   const hma9  = hmaArr(closes, 9)[n]
 
-  // Stokastik (14, 1, 3)
   const stoch = stochArr(highs, lows, closes, 14, 1, 3)
   const kSon = stoch.K[n]
-  const kPrev = stoch.K[n - 1]
   const dSon = stoch.D[n]
-  const dPrev = stoch.D[n - 1]
 
   const baseLine = ichimokuBaseLine(highs, lows, 26)[n]
 
@@ -311,14 +304,13 @@ async function hisseAnaliziGetir(sembol) {
   const prevClose = closes[n - 1]
   const pivot = (prevHigh + prevLow + prevClose) / 3
 
-  // Kontroller
   const c1 = rsi14 >= 45 && rsi14 <= 65
   const c2 = rsi7 <= 70
   const c3 = sar < f
   const c4 = cmf20 >= 0.01 && cmf20 <= 0.3
   const c5 = typeof hma9 === 'number' && hma9 < f
   const c6 = f > o
-  const c7 = (kPrev <= dPrev) && (kSon > dSon)
+  const c7 = (stoch.K[n - 1] <= stoch.D[n - 1]) && (kSon > dSon)
   const c8 = baseLine < f
   const c9 = pivot < f
 
@@ -330,13 +322,30 @@ async function hisseAnaliziGetir(sembol) {
     rsi7:  { val: rsi7, ok: c2 },
     sar:   { val: sar, ok: c3 },
     cmf20: { val: cmf20, ok: c4 },
-    hma9:  { val: hma9, ok: c5 }, // Düzeltildi: val alanı eklendi
+    hma9:  { val: hma9, ok: c5 },
     fiyatAcilis: { ok: c6 },
     stochRsi: { kSon, dSon, ok: c7 },
     baseLine: { val: baseLine, ok: c8 },
     pivot: { val: pivot, ok: c9 },
     hepsiTamam: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9
   }
+}
+
+// Tek bir hissenin rapor kartını string formatında oluşturan yardımcı fonksiyon
+function raporKartiOlustur(a) {
+  let r = `📌 <b>${a.sembol}</b> — Fiyat: ${a.fiyat.toFixed(2)} ₺ | Açılış: ${a.acilis.toFixed(2)} ₺\n`
+  r += `${a.rsi14.ok ? '🟢' : '🔴'} RSI(14): ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'} (45-65)\n`
+  r += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'} (&lt;=70)\n`
+  r += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'} (0.01 - 0.30)\n`
+  r += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat &gt; Açılış\n`
+  r += `${a.stochRsi.ok ? '🟢' : '🔴'} Stokastik: K(${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
+  r += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
+  r += `━━━━━━━━━━━━━━━━━━━━\n`
+  return r
 }
 
 // ── Sinyal Motoru ─────────────────────────────────────────────────────────────
@@ -347,6 +356,8 @@ async function sinyalKontrol(sembol) {
 
   if (a.hepsiTamam) {
     const simdi = Date.now()
+    if (!durum[sembol]) durum[sembol] = { lastSignalTime: 0 }
+    
     if (simdi - durum[sembol].lastSignalTime > 60 * 60 * 1000) {
       durum[sembol].lastSignalTime = simdi
 
@@ -390,31 +401,56 @@ app.post('/webhook', async (req, res) => {
   try {
     const message = req.body?.message
     if (message && message.text) {
-      const gelenMetin = message.text.trim().toLowerCase()
+      let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
-      if (gelenMetin === 'test' || gelenMetin === '/test') {
-        let rapor = `🔍 <b>TELEGRAM TEST RAPORU</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
+      // 1. Tümü İçin Test Raporu Komutu (/test veya test)
+      if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
+        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor.`, chatId)
+        
+        let mesajParcasi = `🔍 <b>TELEGRAM TEST RAPORU</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
 
         for (const sembol of HISSELER) {
           const a = await hisseAnaliziGetir(sembol)
           if (!a) continue
 
-          rapor += `📌 <b>${a.sembol}</b> — Fiyat: ${a.fiyat.toFixed(2)} | Açılış: ${a.acilis.toFixed(2)}\n`
-          rapor += `${a.rsi14.ok ? '🟢' : '🔴'} RSI(14): ${a.rsi14.val.toFixed(1)} (45-65)\n`
-          rapor += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val.toFixed(1)} (&lt;=70)\n`
-          rapor += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n`
-          rapor += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val.toFixed(3)} (0.01 - 0.30)\n`
-          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
-          rapor += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat &gt; Açılış\n`
-          rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stokastik: K(${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
-          rapor += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val.toFixed(2)} (&lt; Fiyat)\n`
-          rapor += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val.toFixed(2)} (&lt; Fiyat)\n`
-          rapor += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
-          rapor += `━━━━━━━━━━━━━━━━━━━━\n`
+          const kart = raporKartiOlustur(a)
+
+          // Telegram 4096 karakter sınırını aşmamak için kontrol
+          if ((mesajParcasi + kart).length > 3800) {
+            await sendTelegram(mesajParcasi, chatId)
+            mesajParcasi = `🔍 <b>TEST RAPORU (Devam)</b>\n\n` + kart
+          } else {
+            mesajParcasi += kart
+          }
         }
 
-        await sendTelegram(rapor, chatId)
+        if (mesajParcasi.length > 0) {
+          await sendTelegram(mesajParcasi, chatId)
+        }
+      } 
+      // 2. Özel Hisse Sorgulama (Örn: THYAO, /hisse garan veya SASA)
+      else {
+        // Komut temizleme (/hisse sas.is -> SAS.IS)
+        let sembol = gelenMetin.replace('/HISSE', '').trim()
+        
+        // Komut boş değilse ve /start vb. genel komutlar değilse hisse kabul et
+        if (sembol.length > 0 && !sembol.startsWith('/')) {
+          if (!sembol.endsWith('.IS')) {
+            sembol = `${sembol}.IS`
+          }
+
+          await sendTelegram(`⏳ <b>${sembol.replace('.IS', '')}</b> verileri çekiliyor...`, chatId)
+
+          const a = await hisseAnaliziGetir(sembol)
+
+          if (!a) {
+            await sendTelegram(`❌ <b>Hata:</b> <code>${sembol.replace('.IS', '')}</code> sembolü için veri bulunamadı veya yetersiz geçmiş veri var. Lütfen hisse kodunu kontrol edin.`, chatId)
+          } else {
+            const mesaj = `🔍 <b>ÖZEL HİSSE ANALİZİ: ${a.sembol}</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n` + raporKartiOlustur(a)
+            await sendTelegram(mesaj, chatId)
+          }
+        }
       }
     }
   } catch (err) {
