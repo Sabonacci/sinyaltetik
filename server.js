@@ -85,19 +85,36 @@ function wmaArr(arr, len) {
   return result
 }
 
-function hmaArr(arr, len) {
+// 2. Hull MA (HMA) Tamamen Tamir Edilmiş Hali
+function hmaArr(closes, len = 9) {
   const halfLen = Math.floor(len / 2)
   const sqrtLen = Math.round(Math.sqrt(len))
-  
-  const wmaHalf = wmaArr(arr, halfLen)
-  const wmaFull = wmaArr(arr, len)
-  
-  const rawHma = arr.map((_, i) => {
-    if (wmaHalf[i] === null || wmaFull[i] === null) return null
-    return 2 * wmaHalf[i] - wmaFull[i]
-  })
 
-  return wmaArr(rawHma, sqrtLen)
+  const wmaHalf = wmaArr(closes, halfLen)
+  const wmaFull = wmaArr(closes, len)
+
+  const diffArr = []
+  for (let i = 0; i < closes.length; i++) {
+    if (wmaHalf[i] === null || wmaFull[i] === null) {
+      diffArr.push(null)
+    } else {
+      diffArr.push(2 * wmaHalf[i] - wmaFull[i])
+    }
+  }
+
+  // Null olmayan kısımlar üzerinden SQRT WMA hesapla
+  const validDiffs = diffArr.filter(v => v !== null)
+  const calculatedHma = wmaArr(validDiffs, sqrtLen)
+
+  const result = new Array(closes.length).fill(null)
+  let cIdx = 0
+  for (let i = 0; i < closes.length; i++) {
+    if (diffArr[i] !== null) {
+      result[i] = calculatedHma[cIdx] !== undefined ? calculatedHma[cIdx] : null
+      cIdx++
+    }
+  }
+  return result
 }
 
 function smaArr(arr, len) {
@@ -220,11 +237,10 @@ function ichimokuBaseLine(highs, lows, period = 26) {
   return baseLine
 }
 
-// ── Veri Çekme ───────────────────────────────────────────────────────────────
-
+// 1. Veri aralığını 1 yıla çıkarıyoruz (TradingView hassasiyeti için)
 async function fetchYahooDaily(symbol) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=3mo`
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`
     const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
     const result = res.data.chart.result[0]
     const q = result.indicators.quote[0]
