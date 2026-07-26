@@ -331,20 +331,57 @@ async function hisseAnaliziGetir(sembol) {
   }
 }
 
-// Tek bir hissenin rapor kartını string formatında oluşturan yardımcı fonksiyon
+// ── Panel Tarzı Rapor Kartı Oluşturucu ───────────────────────────────────────
+
 function raporKartiOlustur(a) {
-  let r = `📌 <b>${a.sembol}</b> — Fiyat: ${a.fiyat.toFixed(2)} ₺ | Açılış: ${a.acilis.toFixed(2)} ₺\n`
-  r += `${a.rsi14.ok ? '🟢' : '🔴'} RSI(14): ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'} (45-65)\n`
-  r += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'} (&lt;=70)\n`
-  r += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
-  r += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'} (0.01 - 0.30)\n`
-  r += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
-  r += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat &gt; Açılış\n`
-  r += `${a.stochRsi.ok ? '🟢' : '🔴'} Stokastik: K(${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
-  r += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
-  r += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
-  r += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
-  r += `━━━━━━━━━━━━━━━━━━━━\n`
+  // 9 Kriterin durum dizisi
+  const kriterler = [
+    { no: 1, ad: 'RSI (14)', val: `${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'} (45-65)`, ok: a.rsi14.ok },
+    { no: 2, ad: 'RSI (7)', val: `${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'} (<=70)`, ok: a.rsi7.ok },
+    { no: 3, ad: 'Parabolic SAR', val: `${a.sar.val ? a.sar.val.toFixed(2) : '-'} (< Fiyat)`, ok: a.sar.ok },
+    { no: 4, ad: 'CMF (20)', val: `${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'} (0.01-0.30)`, ok: a.cmf20.ok },
+    { no: 5, ad: 'Hull MA (9)', val: `${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (< Fiyat)`, ok: a.hma9.ok },
+    { no: 6, ad: 'Fiyat/Açılış', val: `${a.fiyat.toFixed(2)} > ${a.acilis.toFixed(2)}`, ok: a.fiyatAcilis.ok },
+    { no: 7, ad: 'Stokastik K/D', val: `K:${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'} / D:${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'}`, ok: a.stochRsi.ok },
+    { no: 8, ad: 'Base Line', val: `${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (< Fiyat)`, ok: a.baseLine.ok },
+    { no: 9, ad: 'Pivot Noktası', val: `${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (< Fiyat)`, ok: a.pivot.ok }
+  ]
+
+  // Sağlanan kriter sayısını hesapla (0 ile 9 arası)
+  const basariliSayi = kriterler.filter(k => k.ok).length
+  const yuzde = Math.round((basariliSayi / 9) * 100)
+
+  // 1. Dijit Kutucukları (Örn: 4 yeşil, 5 kırmızı kutu -> 🟩🟩🟩🟩🟥🟥🟥🟥🟥)
+  const dijitKutulari = '🟩'.repeat(basariliSayi) + '🟥'.repeat(9 - basariliSayi)
+
+  // 2. Yüzde İlerleme Barı (Örn: [████████░░░░░░░░])
+  const toplamBar = 12
+  const doluBar = Math.round((basariliSayi / 9) * toplamBar)
+  const ilerlemeBari = '█'.repeat(doluBar) + '░'.repeat(toplamBar - doluBar)
+
+  // Panel Başlığı ve Göstergeler
+  let r = `🎛️ <b>PANEL ANALİZİ: ${a.sembol}</b>\n`
+  r += `───────────────────\n`
+  r += `📊 <b>SKOR :</b> [${dijitKutulari}] <b>${basariliSayi} / 9</b>\n`
+  r += `📈 <b>BARS :</b> [<code>${ilerlemeBari}</code>] %${yuzde}\n`
+  r += `💰 <b>FİYAT:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n`
+  r += `───────────────────\n`
+
+  // 9 Kriter Satırı
+  kriterler.forEach(k => {
+    const ikon = k.ok ? '🟢' : '🔴'
+    // İsimleri hizada tutmak için padEnd mantığı (HTML kodlarında monospace görünüm için code etiketi)
+    r += `[${k.no}] ${ikon} <b>${k.ad.padEnd(14, ' ')}:</b> <code>${k.val}</code>\n`
+  })
+
+  r += `───────────────────\n`
+  
+  if (a.hepsiTamam) {
+    r += `STATUS: 🚀 <b>9/9 MÜKEMMEL AL SİNYALİ</b>\n`
+  } else {
+    r += `STATUS: ⏳ <b>${basariliSayi}/9 KOŞUL SAĞLANDI</b>\n`
+  }
+
   return r
 }
 
