@@ -11,7 +11,8 @@ const TELEGRAM_CHAT_ID = '5756145019'
 
 // Takip edilecek hisseler
 const HISSELER = [
-  'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS'
+  'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'BIOEN.IS',
+  'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENRJSA.IS', 'GESAN.IS', 'PCİLT.IS'
 ]
 
 const DOSYA = '/tmp/islemler.json'
