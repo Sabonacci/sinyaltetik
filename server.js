@@ -36,7 +36,7 @@ HISSELER.forEach(h => {
   }
 })
 
-// ── Matematiksel / İndikatör Fonksiyonları ──────────────────────────────────
+// ── İndikatör Hesaplama Fonksiyonları ───────────────────────────────────────
 
 function rsiArr(closes, period) {
   if (closes.length < period + 1) return []
@@ -85,33 +85,39 @@ function wmaArr(arr, len) {
   return result
 }
 
+// Güvenli Hull MA (9)
 function hmaArr(closes, len = 9) {
+  if (!closes || closes.length < len) return new Array(closes ? closes.length : 0).fill(null)
+
   const halfLen = Math.floor(len / 2)
   const sqrtLen = Math.round(Math.sqrt(len))
 
   const wmaHalf = wmaArr(closes, halfLen)
   const wmaFull = wmaArr(closes, len)
 
-  const diffArr = []
-  for (let i = 0; i < closes.length; i++) {
-    if (wmaHalf[i] === null || wmaFull[i] === null) {
-      diffArr.push(null)
-    } else {
-      diffArr.push(2 * wmaHalf[i] - wmaFull[i])
+  const diffArr = closes.map((_, i) => {
+    if (wmaHalf[i] === null || wmaFull[i] === null) return null
+    return 2 * wmaHalf[i] - wmaFull[i]
+  })
+
+  const validIndices = []
+  const validDiffs = []
+  diffArr.forEach((v, i) => {
+    if (v !== null) {
+      validIndices.push(i)
+      validDiffs.push(v)
     }
-  }
+  })
 
-  const validDiffs = diffArr.filter(v => v !== null)
-  const calculatedHma = wmaArr(validDiffs, sqrtLen)
-
+  const hmaValid = wmaArr(validDiffs, sqrtLen)
   const result = new Array(closes.length).fill(null)
-  let cIdx = 0
-  for (let i = 0; i < closes.length; i++) {
-    if (diffArr[i] !== null) {
-      result[i] = calculatedHma[cIdx] !== undefined ? calculatedHma[cIdx] : null
-      cIdx++
+
+  hmaValid.forEach((v, i) => {
+    if (v !== null) {
+      result[validIndices[i]] = v
     }
-  }
+  })
+
   return result
 }
 
@@ -127,7 +133,7 @@ function smaArr(arr, len) {
   return result
 }
 
-// Klasik Stokastik (TradingView 14, 1, 3 Ayarı)
+// Klasik Stokastik (14, 1, 3) - TradingView Ekranıyla Birebir Uyumlu
 function stochArr(highs, lows, closes, period = 14, kSmooth = 1, dSmooth = 3) {
   const kRaw = new Array(closes.length).fill(null)
   
@@ -237,7 +243,7 @@ function ichimokuBaseLine(highs, lows, period = 26) {
   return baseLine
 }
 
-// ── Veri Çekme (1 Yıllık Derinlik) ──────────────────────────────────────────
+// ── Veri Çekme Fonksiyonu ───────────────────────────────────────────────────
 
 async function fetchYahooDaily(symbol) {
   try {
@@ -290,7 +296,7 @@ async function hisseAnaliziGetir(sembol) {
   const cmf20 = cmfArr(highs, lows, closes, vols, 20)[n]
   const hma9  = hmaArr(closes, 9)[n]
 
-  // TradingView ile birebir uyumlu Stokastik (14, 1, 3)
+  // Stokastik (14, 1, 3)
   const stoch = stochArr(highs, lows, closes, 14, 1, 3)
   const kSon = stoch.K[n]
   const kPrev = stoch.K[n - 1]
@@ -323,7 +329,7 @@ async function hisseAnaliziGetir(sembol) {
     rsi7:  { val: rsi7, ok: c2 },
     sar:   { val: sar, ok: c3 },
     cmf20: { val: cmf20, ok: c4 },
-    hma9:  { val: hma9, ok: c5 },
+    hma9:  { val: hma9, ok: c5 }, // Düzeltildi: val alanı eklendi
     fiyatAcilis: { ok: c6 },
     stochRsi: { kSon, dSon, ok: c7 },
     baseLine: { val: baseLine, ok: c8 },
@@ -351,7 +357,7 @@ async function sinyalKontrol(sembol) {
         `✅ <b>RSI (7):</b> ${a.rsi7.val.toFixed(1)}\n` +
         `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n` +
         `✅ <b>CMF (20):</b> ${a.cmf20.val.toFixed(3)}\n` +
-        `✅ <b>Hull MA (9):</b> ${typeof a.hma9.val === 'number' ? a.hma9.val.toFixed(2) : '-'}\n` +
+        `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'}\n` +
         `✅ <b>Stokastik:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
         `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val.toFixed(2)}\n` +
         `✅ <b>Pivot:</b> ${a.pivot.val.toFixed(2)}\n` +
@@ -375,7 +381,7 @@ async function kontrolEt() {
   console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
 }
 
-// ── Sunucu ve Telegram Webhook Rotası ────────────────────────────────────────
+// ── Express Sunucu ve Webhook Rotası ─────────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
 
@@ -398,9 +404,9 @@ app.post('/webhook', async (req, res) => {
           rapor += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val.toFixed(1)} (&lt;=70)\n`
           rapor += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n`
           rapor += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val.toFixed(3)} (0.01 - 0.30)\n`
-          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${typeof a.hma9.val === 'number' ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+          rapor += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
           rapor += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat &gt; Açılış\n`
-          rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stokastik: K(${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
+          rapor += `${a.stochRsi.ok ? '🟢' : '🔴'} Stokastik: K(${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
           rapor += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val.toFixed(2)} (&lt; Fiyat)\n`
           rapor += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val.toFixed(2)} (&lt; Fiyat)\n`
           rapor += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
@@ -421,4 +427,4 @@ app.listen(3000, () => {
   console.log('Sunucu başladı')
   kontrolEt()
   setInterval(kontrolEt, 60 * 1000)
-}))
+})
