@@ -384,7 +384,7 @@ function raporKartiOlustur(a) {
   return r
 }
 
-// ── Sinyal Motoru ─────────────────────────────────────────────────────────────
+// ── Sinyal Motoru (HTML Kaçış Karakterleri Düzeltildi) ───────────────────────
 
 async function sinyalKontrol(sembol) {
   const a = await hisseAnaliziGetir(sembol)
@@ -397,18 +397,23 @@ async function sinyalKontrol(sembol) {
     if (simdi - durum[sembol].lastSignalTime > 60 * 60 * 1000) {
       durum[sembol].lastSignalTime = simdi
 
+      // Dijit kutularını sinyal mesajına da ekliyoruz
+      const dijitKutulari = '🟩'.repeat(9)
+
       const msg = 
         `🚀 <b>STRATEJİ SİNYALİ VERDİ: ${a.sembol}</b>\n\n` +
-        `💰 <b>Fiyat:</b> ${a.fiyat.toFixed(2)} ₺ (Açılış: ${a.acilis.toFixed(2)})\n` +
+        `📊 <b>SKOR :</b> [${dijitKutulari}] <b>9 / 9</b>\n` +
+        `💰 <b>Fiyat:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `✅ <b>RSI (14):</b> ${a.rsi14.val.toFixed(1)}\n` +
-        `✅ <b>RSI (7):</b> ${a.rsi7.val.toFixed(1)}\n` +
-        `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n` +
-        `✅ <b>CMF (20):</b> ${a.cmf20.val.toFixed(3)}\n` +
-        `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'}\n` +
+        `✅ <b>RSI (14):</b> ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'}\n` +
+        `✅ <b>RSI (7):</b> ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'}\n` +
+        `✅ <b>Parabolic SAR:</b> ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+        `✅ <b>CMF (20):</b> ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'}\n` +
+        `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+        `✅ <b>Fiyat &gt; Açılış:</b> ${a.fiyat.toFixed(2)} &gt; ${a.acilis.toFixed(2)}\n` +
         `✅ <b>Stokastik:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
-        `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val.toFixed(2)}\n` +
-        `✅ <b>Pivot:</b> ${a.pivot.val.toFixed(2)}\n` +
+        `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+        `✅ <b>Pivot:</b> ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
 
@@ -417,18 +422,6 @@ async function sinyalKontrol(sembol) {
     }
   }
 }
-
-async function kontrolEt() {
-  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
-  console.log(`[${saat}] Kontrol başladı...`)
-
-  for (const sembol of HISSELER) {
-    await sinyalKontrol(sembol)
-  }
-
-  console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
-}
-
 // ── Express Sunucu ve Webhook Rotası ─────────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
