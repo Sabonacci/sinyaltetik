@@ -456,7 +456,7 @@ async function kontrolEt() {
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
 
 app.post('/webhook', async (req, res) => {
-  // 1. Telegram'a ANINDA cevap ver ki zaman aşımına (Timeout) uğramasın!
+  // Telegram Webhook zaman aşımına uğramaması için anında yanıt veriyoruz
   res.sendStatus(200)
 
   try {
@@ -465,20 +465,34 @@ app.post('/webhook', async (req, res) => {
       let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
-      // 1. Tümü İçin Test Raporu Komutu (/test veya test)
+      // 1. Test Raporu Komutu (/test veya test)
       if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
-        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse paralel olarak analiz ediliyor.`, chatId)
+        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor (Filtre: En az 8/9 skor).`, chatId)
 
-        // Hisseleri sırayla çekmek yerine PARALEL olarak aynı anda çekiyoruz (Çok daha hızlı)
+        // Hisseler paralel olarak çekiliyor
         const analizSözleri = HISSELER.map(sembol => hisseAnaliziGetir(sembol))
         const sonuçlar = await Promise.all(analizSözleri)
 
-        // Hatalı veya veri gelmeyen hisseleri eliyoruz
-        const geçerliAnalizler = sonuçlar.filter(a => a !== null)
+        // 🎯 FİLTRELEME: Sadece verisi gelen VE en az 8 kriteri sağlayan hisseleri al
+        const filitrelenmisHisseler = sonuçlar.filter(a => {
+          if (!a) return false
+          
+          // Sağlanan kriter sayısını hesapla
+          const kriterler = [a.rsi14.ok, a.rsi7.ok, a.sar.ok, a.cmf20.ok, a.hma9.ok, a.fiyatAcilis.ok, a.stochRsi.ok, a.baseLine.ok, a.pivot.ok]
+          const basariliSayi = kriterler.filter(Boolean).length
 
-        let mesajParcasi = `🔍 <b>TELEGRAM TEST RAPORU</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
+          return basariliSayi >= 8 // En az 8 kriter şartı
+        })
 
-        for (const a of geçerliAnalizler) {
+        // Eğer 8/9 veya 9/9 sağlayan hisse yoksa bilgi ver
+        if (filitrelenmisHisseler.length === 0) {
+          await sendTelegram(`🔍 <b>TEST RAPORU SONUCU</b>\n\n⚠️ Şu an takip listesindeki hiçbir hisse <b>8/9 veya 9/9</b> kriter şartını sağlamıyor.`, chatId)
+          return
+        }
+
+        let mesajParcasi = `🔍 <b>TEST RAPORU (Min. 8/9 Skor)</b>\n🎯 Eşleşen Hisse: <b>${filitrelenmisHisseler.length} adet</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
+
+        for (const a of filitrelenmisHisseler) {
           const kart = raporKartiOlustur(a)
 
           // Telegram 4096 karakter sınırını aşmamak için parça parça gönderim
@@ -511,7 +525,7 @@ app.post('/webhook', async (req, res) => {
             await sendTelegram(`❌ <b>Hata:</b> <code>${sembol.replace('.IS', '')}</code> sembolü için veri bulunamadı veya yetersiz geçmiş veri var. Lütfen hisse kodunu kontrol edin.`, chatId)
           } else {
             const mesaj = `🔍 <b>ÖZEL HİSSE ANALİZİ: ${a.sembol}</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n` + raporKartiOlustur(a)
-            await sendTelegram(mesaj, chatId)
+            await sendTelegram(mesaj, mesaj.contains ? chatId : chatId)
           }
         }
       }
