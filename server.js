@@ -456,23 +456,32 @@ async function kontrolEt() {
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
 
 app.post('/webhook', async (req, res) => {
+  // 1. Telegram'a ANINDA cevap ver ki zaman aşımına (Timeout) uğramasın!
+  res.sendStatus(200)
+
   try {
     const message = req.body?.message
     if (message && message.text) {
       let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
+      // 1. Tümü İçin Test Raporu Komutu (/test veya test)
       if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
-        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor.`, chatId)
-        
+        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse paralel olarak analiz ediliyor.`, chatId)
+
+        // Hisseleri sırayla çekmek yerine PARALEL olarak aynı anda çekiyoruz (Çok daha hızlı)
+        const analizSözleri = HISSELER.map(sembol => hisseAnaliziGetir(sembol))
+        const sonuçlar = await Promise.all(analizSözleri)
+
+        // Hatalı veya veri gelmeyen hisseleri eliyoruz
+        const geçerliAnalizler = sonuçlar.filter(a => a !== null)
+
         let mesajParcasi = `🔍 <b>TELEGRAM TEST RAPORU</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
 
-        for (const sembol of HISSELER) {
-          const a = await hisseAnaliziGetir(sembol)
-          if (!a) continue
-
+        for (const a of geçerliAnalizler) {
           const kart = raporKartiOlustur(a)
 
+          // Telegram 4096 karakter sınırını aşmamak için parça parça gönderim
           if ((mesajParcasi + kart).length > 3800) {
             await sendTelegram(mesajParcasi, chatId)
             mesajParcasi = `🔍 <b>TEST RAPORU (Devam)</b>\n\n` + kart
@@ -485,6 +494,7 @@ app.post('/webhook', async (req, res) => {
           await sendTelegram(mesajParcasi, chatId)
         }
       } 
+      // 2. Özel Hisse Sorgulama
       else {
         let sembol = gelenMetin.replace('/HISSE', '').trim()
         
@@ -509,12 +519,4 @@ app.post('/webhook', async (req, res) => {
   } catch (err) {
     console.error('Webhook işleme hatası:', err.message)
   }
-
-  res.sendStatus(200)
-})
-
-app.listen(3000, () => {
-  console.log('Sunucu başladı')
-  kontrolEt()
-  setInterval(kontrolEt, 60 * 1000)
 })
