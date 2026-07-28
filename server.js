@@ -304,17 +304,25 @@ async function fetchYahooDaily(symbol) {
   }
 }
 
-// Endeks Değerlerini Çekme Fonksiyonu
+// Güncellenmiş ve Hataları Giderilmiş Endeks Veri Fonksiyonu
 async function endeksVerisiGetir(item) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${item.kod}?interval=1d&range=5d`
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 })
+    // 1 aylık günlük mum verilerini çekiyoruz
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${item.kod}?interval=1d&range=1m`
+    const res = await axios.get(url, { 
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, 
+      timeout: 10000 
+    })
+    
     const result = res.data?.chart?.result?.[0]
     if (!result) return null
 
-    const meta = result.meta
-    const sonFiyat = meta.regularMarketPrice
-    const oncekiKapanis = meta.chartPreviousClose || meta.previousClose
+    const closes = result.indicators?.quote?.[0]?.close?.filter(c => c !== null && c !== undefined)
+    if (!closes || closes.length < 2) return null
+
+    // En son kapanış/canlı fiyat ve bir önceki günün kapanış fiyatı
+    const sonFiyat = closes[closes.length - 1]
+    const oncekiKapanis = closes[closes.length - 2]
     
     const degisim = sonFiyat - oncekiKapanis
     const yuzdeDegisim = (degisim / oncekiKapanis) * 100
