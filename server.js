@@ -9,23 +9,10 @@ app.use(express.json())
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
+
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
-]
-
-// Dünya ve Uzak Doğu Endeks Sembolleri
-const ENDEKSLER = [
-  { kod: '^XU100',    ad: '🇹🇷 BIST 100' },
-  { kod: '^N225',     ad: '🇯🇵 Nikkei 225 (Japonya)' },
-  { kod: '^HSI',      ad: '🇭🇰 Hang Seng (Hong Kong)' },
-  { kod: '000001.SS', ad: '🇨🇳 Shanghai Comp (Cin)' },
-  { kod: '^KS11',     ad: '🇰🇷 KOSPI (G. Kore)' },
-  { kod: '^GSPC',     ad: '🇺🇸 S&P 500' },
-  { kod: '^IXIC',     ad: '🇺🇸 Nasdaq' },
-  { kod: '^DJI',      ad: '🇺🇸 Dow Jones' },
-  { kod: '^GDAXI',    ad: '🇩🇪 DAX (Almanya)' },
-  { kod: '^FTSE',     ad: '🇬🇧 FTSE 100 (Ingiltere)' }
 ]
 
 const DOSYA = '/tmp/islemler.json'
@@ -37,6 +24,12 @@ function islemleriYukle() {
   } catch(e) {}
   return []
 }
+
+function islemleriKaydet() {
+  try { fs.writeFileSync(DOSYA, JSON.stringify(gunlukIslemler)) } catch(e) {}
+}
+
+// ── Sinyal Durumu Kaydetme ve Yükleme ───────────────────────────────────────
 
 function durumYukle() {
   try {
@@ -269,12 +262,12 @@ function ichimokuBaseLine(highs, lows, period = 26) {
   return baseLine
 }
 
-// ── Veri Çekme Fonksiyonları ───────────────────────────────────────────────
+// ── Veri Çekme Fonksiyonu ───────────────────────────────────────────────────
 
 async function fetchYahooDaily(symbol) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, timeout: 10000 })
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 })
     const result = res.data?.chart?.result?.[0]
     if (!result) return null
 
@@ -293,40 +286,6 @@ async function fetchYahooDaily(symbol) {
     }
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
-    return null
-  }
-}
-
-// Güvenli ve Doğru Endeks Verisi Çekme
-// Kodun en üstüne kütüphaneyi ekle:
-const yahooFinance = require('yahoo-finance2').default
-
-// Düzeltilmiş ve Engellere Takılmayan Endeks Fonksiyonu
-async function endeksVerisiGetir(item) {
-  try {
-    // yahoo-finance2 kütüphanesi otomatik çerez ve header yönetimini kendi yapar
-    const result = await yahooFinance.chart(item.kod, { period1: '1m', interval: '1d' })
-    
-    if (!result || !result.quotes || result.quotes.length < 2) return null
-
-    // Geçerli kapanış verilerini filtrele
-    const validQuotes = result.quotes.filter(q => q.close !== null && q.close !== undefined)
-    if (validQuotes.length < 2) return null
-
-    const sonFiyat = validQuotes[validQuotes.length - 1].close
-    const oncekiKapanis = validQuotes[validQuotes.length - 2].close
-
-    const degisim = sonFiyat - oncekiKapanis
-    const yuzdeDegisim = (degisim / oncekiKapanis) * 100
-
-    return {
-      ad: item.ad,
-      fiyat: sonFiyat,
-      degisim: degisim,
-      yuzde: yuzdeDegisim
-    }
-  } catch (e) {
-    console.error(`${item.ad} verisi çekilemedi:`, e.message)
     return null
   }
 }
@@ -396,7 +355,7 @@ async function hisseAnaliziGetir(sembol) {
   }
 }
 
-// ── Rapor Kartı Oluşturucu ───────────────────────────────────────────────────
+// ── Panel Tarzı Rapor Kartı Oluşturucu ────────────────────────────────────────
 
 function raporKartiOlustur(a) {
   const kriterler = [
@@ -508,39 +467,7 @@ app.post('/webhook', async (req, res) => {
       let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
-      // 1. ENDEKS RAPORU KOMUTU (/endeks veya endeks)
-      if (gelenMetin === 'ENDEKS' || gelenMetin === '/ENDEKS') {
-        await sendTelegram(`⏳ <b>Küresel Piyasa Endeksleri Çekiliyor...</b>`, chatId)
-
-        const sozler = ENDEKSLER.map(item => endeksVerisiGetir(item))
-        const sonuclar = await Promise.all(sozler)
-
-        const gecerliSonuclar = sonuclar.filter(e => e !== null)
-
-        if (gecerliSonuclar.length === 0) {
-          await sendTelegram(`❌ <b>Hata:</b> Endeks verileri şu an Yahoo Finance üzerinden çekilemedi. Lütfen biraz sonra tekrar deneyin.`, chatId)
-          return
-        }
-
-        let msg = `🌍 <b>DÜNYA & UZAK DOĞU ENDEKSLERİ</b>\n`
-        msg += `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n`
-        msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
-
-        gecerliSonuclar.forEach(e => {
-          const yon = e.yuzde >= 0 ? '🟢' : '🔴'
-          const isaret = e.yuzde >= 0 ? '+' : ''
-          const fiyatStr = e.fiyat.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          const yuzdeStr = `${isaret}${e.yuzde.toFixed(2)}%`
-
-          msg += `<b>${e.ad}</b>\n`
-          msg += `💰 <b>${fiyatStr}</b> | ${yon} <code>${yuzdeStr}</code>\n\n`
-        })
-
-        msg += `━━━━━━━━━━━━━━━━━━━━`
-        await sendTelegram(msg, chatId)
-      }
-      // 2. TEST RAPORU KOMUTU (/test veya test)
-      else if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
+      if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
         await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor (Filtre: Min. 8/9 Skor).`, chatId)
 
         const analizSozleri = HISSELER.map(sembol => hisseAnaliziGetir(sembol))
@@ -574,7 +501,6 @@ app.post('/webhook', async (req, res) => {
           await sendTelegram(mesajParcasi, chatId)
         }
       } 
-      // 3. ÖZEL HİSSE SORGULAMA
       else {
         let sembol = gelenMetin.replace('/HISSE', '').trim()
         
@@ -601,11 +527,13 @@ app.post('/webhook', async (req, res) => {
   }
 })
 
+// Render uyumlu Dinamik Port Ataması
 const PORT = process.env.PORT || 3000
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda başarıyla başladı ✅`)
   
+  // İlk taramayı güvenli olarak çalıştır
   kontrolEt().catch(err => console.error('Başlangıç tarama hatası:', err.message))
   setInterval(kontrolEt, 60 * 1000)
 })
