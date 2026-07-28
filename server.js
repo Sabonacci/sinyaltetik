@@ -9,15 +9,6 @@ app.use(express.json())
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
-const axios   = require('axios')
-const express = require('express')
-const fs      = require('fs')
-const app     = express()
-
-app.use(express.json())
-
-const TELEGRAM_TOKEN   = 'xxx'
-const TELEGRAM_CHAT_ID = 'xxx'
 
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
