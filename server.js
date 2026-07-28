@@ -298,24 +298,23 @@ async function fetchYahooDaily(symbol) {
 }
 
 // Güvenli ve Doğru Endeks Verisi Çekme
+// Kodun en üstüne kütüphaneyi ekle:
+const yahooFinance = require('yahoo-finance2').default
+
+// Düzeltilmiş ve Engellere Takılmayan Endeks Fonksiyonu
 async function endeksVerisiGetir(item) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.kod)}?interval=1d&range=1m`
-    const res = await axios.get(url, { 
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, 
-      timeout: 10000 
-    })
+    // yahoo-finance2 kütüphanesi otomatik çerez ve header yönetimini kendi yapar
+    const result = await yahooFinance.chart(item.kod, { period1: '1m', interval: '1d' })
     
-    const result = res.data?.chart?.result?.[0]
-    if (!result) return null
+    if (!result || !result.quotes || result.quotes.length < 2) return null
 
-    const closes = result.indicators?.quote?.[0]?.close?.filter(c => typeof c === 'number' && !isNaN(c))
-    if (!closes || closes.length < 2) return null
+    // Geçerli kapanış verilerini filtrele
+    const validQuotes = result.quotes.filter(q => q.close !== null && q.close !== undefined)
+    if (validQuotes.length < 2) return null
 
-    const sonFiyat = closes[closes.length - 1]
-    const oncekiKapanis = closes[closes.length - 2]
-    
-    if (!sonFiyat || !oncekiKapanis) return null
+    const sonFiyat = validQuotes[validQuotes.length - 1].close
+    const oncekiKapanis = validQuotes[validQuotes.length - 2].close
 
     const degisim = sonFiyat - oncekiKapanis
     const yuzdeDegisim = (degisim / oncekiKapanis) * 100
@@ -327,7 +326,7 @@ async function endeksVerisiGetir(item) {
       yuzde: yuzdeDegisim
     }
   } catch (e) {
-    console.error(`${item.ad} verisi alınamadı:`, e.message)
+    console.error(`${item.ad} verisi çekilemedi:`, e.message)
     return null
   }
 }
