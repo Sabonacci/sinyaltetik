@@ -9,7 +9,6 @@ app.use(express.json())
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
-
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
@@ -17,16 +16,16 @@ const HISSELER = [
 
 // Dünya ve Uzak Doğu Endeks Sembolleri
 const ENDEKSLER = [
-  { kod: '^XU100', ad: '🇹🇷 BIST 100' },
-  { kod: '^N225',  ad: '🇯🇵 Nikkei 225 (Japonya)' },
-  { kod: '^HSI',   ad: '🇭🇰 Hang Seng (Hong Kong)' },
-  { kod: '000001.SS', ad: '🇨🇳 Shanghai Comp. (Çin)' },
-  { kod: '^KS11',  ad: '🇰🇷 KOSPI (G. Kore)' },
-  { kod: '^GSPC',  ad: '🇺🇸 S&P 500' },
-  { kod: '^IXIC',  ad: '🇺🇸 Nasdaq' },
-  { kod: '^DJI',   ad: '🇺🇸 Dow Jones' },
-  { kod: '^GDAXI', ad: '🇩🇪 DAX (Almanya)' },
-  { kod: '^FTSE',  ad: '🇬🇧 FTSE 100 (İngiltere)' }
+  { kod: '^XU100',    ad: '🇹🇷 BIST 100' },
+  { kod: '^N225',     ad: '🇯🇵 Nikkei 225 (Japonya)' },
+  { kod: '^HSI',      ad: '🇭🇰 Hang Seng (Hong Kong)' },
+  { kod: '000001.SS', ad: '🇨🇳 Shanghai Comp (Cin)' },
+  { kod: '^KS11',     ad: '🇰🇷 KOSPI (G. Kore)' },
+  { kod: '^GSPC',     ad: '🇺🇸 S&P 500' },
+  { kod: '^IXIC',     ad: '🇺🇸 Nasdaq' },
+  { kod: '^DJI',      ad: '🇺🇸 Dow Jones' },
+  { kod: '^GDAXI',    ad: '🇩🇪 DAX (Almanya)' },
+  { kod: '^FTSE',     ad: '🇬🇧 FTSE 100 (Ingiltere)' }
 ]
 
 const DOSYA = '/tmp/islemler.json'
@@ -38,12 +37,6 @@ function islemleriYukle() {
   } catch(e) {}
   return []
 }
-
-function islemleriKaydet() {
-  try { fs.writeFileSync(DOSYA, JSON.stringify(gunlukIslemler)) } catch(e) {}
-}
-
-// ── Sinyal Durumu Kaydetme ve Yükleme ───────────────────────────────────────
 
 function durumYukle() {
   try {
@@ -281,7 +274,7 @@ function ichimokuBaseLine(highs, lows, period = 26) {
 async function fetchYahooDaily(symbol) {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 })
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, timeout: 10000 })
     const result = res.data?.chart?.result?.[0]
     if (!result) return null
 
@@ -304,11 +297,10 @@ async function fetchYahooDaily(symbol) {
   }
 }
 
-// Güncellenmiş ve Hataları Giderilmiş Endeks Veri Fonksiyonu
+// Güvenli ve Doğru Endeks Verisi Çekme
 async function endeksVerisiGetir(item) {
   try {
-    // 1 aylık günlük mum verilerini çekiyoruz
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${item.kod}?interval=1d&range=1m`
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.kod)}?interval=1d&range=1m`
     const res = await axios.get(url, { 
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, 
       timeout: 10000 
@@ -317,13 +309,14 @@ async function endeksVerisiGetir(item) {
     const result = res.data?.chart?.result?.[0]
     if (!result) return null
 
-    const closes = result.indicators?.quote?.[0]?.close?.filter(c => c !== null && c !== undefined)
+    const closes = result.indicators?.quote?.[0]?.close?.filter(c => typeof c === 'number' && !isNaN(c))
     if (!closes || closes.length < 2) return null
 
-    // En son kapanış/canlı fiyat ve bir önceki günün kapanış fiyatı
     const sonFiyat = closes[closes.length - 1]
     const oncekiKapanis = closes[closes.length - 2]
     
+    if (!sonFiyat || !oncekiKapanis) return null
+
     const degisim = sonFiyat - oncekiKapanis
     const yuzdeDegisim = (degisim / oncekiKapanis) * 100
 
@@ -523,17 +516,25 @@ app.post('/webhook', async (req, res) => {
         const sozler = ENDEKSLER.map(item => endeksVerisiGetir(item))
         const sonuclar = await Promise.all(sozler)
 
+        const gecerliSonuclar = sonuclar.filter(e => e !== null)
+
+        if (gecerliSonuclar.length === 0) {
+          await sendTelegram(`❌ <b>Hata:</b> Endeks verileri şu an Yahoo Finance üzerinden çekilemedi. Lütfen biraz sonra tekrar deneyin.`, chatId)
+          return
+        }
+
         let msg = `🌍 <b>DÜNYA & UZAK DOĞU ENDEKSLERİ</b>\n`
         msg += `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n`
         msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
 
-        sonuclar.forEach(e => {
-          if (e) {
-            const yon = e.yuzde >= 0 ? '🟢' : '🔴'
-            const isaret = e.yuzde >= 0 ? '+' : ''
-            msg += `${e.ad}\n`
-            msg += `💰 <b>${e.fiyat.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</b> | ${yon} <code>${isaret}${e.yuzde.toFixed(2)}%</code>\n\n`
-          }
+        gecerliSonuclar.forEach(e => {
+          const yon = e.yuzde >= 0 ? '🟢' : '🔴'
+          const isaret = e.yuzde >= 0 ? '+' : ''
+          const fiyatStr = e.fiyat.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          const yuzdeStr = `${isaret}${e.yuzde.toFixed(2)}%`
+
+          msg += `<b>${e.ad}</b>\n`
+          msg += `💰 <b>${fiyatStr}</b> | ${yon} <code>${yuzdeStr}</code>\n\n`
         })
 
         msg += `━━━━━━━━━━━━━━━━━━━━`
