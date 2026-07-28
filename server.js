@@ -9,13 +9,13 @@ app.use(express.json())
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
-// Takip edilecek sabit hisseler (Otomatik sinyal motoru için)
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
 ]
 
 const DOSYA = '/tmp/islemler.json'
+const DURUM_DOSYASI = '/tmp/durum.json'
 
 function islemleriYukle() {
   try {
@@ -28,11 +28,33 @@ function islemleriKaydet() {
   try { fs.writeFileSync(DOSYA, JSON.stringify(gunlukIslemler)) } catch(e) {}
 }
 
+// ── Sinyal Durumu Kaydetme ve Yükleme Fonksiyonları ─────────────────────────
+
+function durumYukle() {
+  try {
+    if (fs.existsSync(DURUM_DOSYASI)) {
+      return JSON.parse(fs.readFileSync(DURUM_DOSYASI, 'utf8'))
+    }
+  } catch(e) {
+    console.error('Durum yükleme hatası:', e.message)
+  }
+  return {}
+}
+
+function durumKaydet() {
+  try {
+    fs.writeFileSync(DURUM_DOSYASI, JSON.stringify(durum))
+  } catch(e) {
+    console.error('Durum kaydetme hatası:', e.message)
+  }
+}
+
 var gunlukIslemler = islemleriYukle()
 
-const durum = {}
+// Kalıcı durum objesini yüklüyoruz
+const durum = durumYukle()
 HISSELER.forEach(h => {
-  durum[h] = { lastSignalTime: 0 }
+  if (!durum[h]) durum[h] = { lastSignalBarTime: null }
 })
 
 // ── İndikatör Hesaplama Fonksiyonları ───────────────────────────────────────
@@ -331,10 +353,9 @@ async function hisseAnaliziGetir(sembol) {
   }
 }
 
-// ── Panel Tarzı Rapor Kartı Oluşturucu (400 Hatası Düzeltildi) ────────────────
+// ── Panel Tarzı Rapor Kartı Oluşturucu ────────────────────────────────────────
 
 function raporKartiOlustur(a) {
-  // 9 Kriterin durum dizisi (HTML kaçış karakterleri düzenlendi)
   const kriterler = [
     { no: 1, ad: 'RSI (14)', val: `${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'} (45-65)`, ok: a.rsi14.ok },
     { no: 2, ad: 'RSI (7)', val: `${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'} (&lt;=70)`, ok: a.rsi7.ok },
@@ -347,19 +368,15 @@ function raporKartiOlustur(a) {
     { no: 9, ad: 'Pivot Noktası', val: `${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)`, ok: a.pivot.ok }
   ]
 
-  // Sağlanan kriter sayısını hesapla
   const basariliSayi = kriterler.filter(k => k.ok).length
   const yuzde = Math.round((basariliSayi / 9) * 100)
 
-  // 1. Dijit Kutucukları (Örn: 🟩🟩🟩🟩🟥🟥🟥🟥🟥)
   const dijitKutulari = '🟩'.repeat(basariliSayi) + '🟥'.repeat(9 - basariliSayi)
 
-  // 2. Yüzde İlerleme Barı
   const toplamBar = 10
   const doluBar = Math.round((basariliSayi / 9) * toplamBar)
   const ilerlemeBari = '█'.repeat(doluBar) + '░'.repeat(toplamBar - doluBar)
 
-  // Panel Başlığı ve Göstergeler
   let r = `🎛️ <b>PANEL ANALİZİ: ${a.sembol}</b>\n`
   r += `━━━━━━━━━━━━━━━━━━━━\n`
   r += `📊 <b>SKOR :</b> [${dijitKutulari}] <b>${basariliSayi} / 9</b>\n`
@@ -367,7 +384,6 @@ function raporKartiOlustur(a) {
   r += `💰 <b>FİYAT:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n`
   r += `━━━━━━━━━━━━━━━━━━━━\n`
 
-  // 9 Kriter Satırı
   kriterler.forEach(k => {
     const ikon = k.ok ? '🟢' : '🔴'
     r += `[${k.no}] ${ikon} <b>${k.ad}:</b> <code>${k.val}</code>\n`
@@ -384,44 +400,57 @@ function raporKartiOlustur(a) {
   return r
 }
 
-// ── Sinyal Motoru (HTML Kaçış Karakterleri Düzeltildi) ───────────────────────
+// ── Düzeltilmiş Sinyal Motoru ───────────────────────────────────────────────
 
 async function sinyalKontrol(sembol) {
   const a = await hisseAnaliziGetir(sembol)
   if (!a) return
 
+  // Bugünün tarihini alıyoruz (Örn: "2026-03-30")
+  const bugun = new Date().toISOString().split('T')[0]
+
   if (a.hepsiTamam) {
-    const simdi = Date.now()
-    if (!durum[sembol]) durum[sembol] = { lastSignalTime: 0 }
+    if (!durum[sembol]) durum[sembol] = { lastSignalBarTime: null }
     
-    if (simdi - durum[sembol].lastSignalTime > 60 * 60 * 1000) {
-      durum[sembol].lastSignalTime = simdi
-
-      // Dijit kutularını sinyal mesajına da ekliyoruz
-      const dijitKutulari = '🟩'.repeat(9)
-
-      const msg = 
-        `🚀 <b>STRATEJİ SİNYALİ VERDİ: ${a.sembol}</b>\n\n` +
-        `📊 <b>SKOR :</b> [${dijitKutulari}] <b>9 / 9</b>\n` +
-        `💰 <b>Fiyat:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `✅ <b>RSI (14):</b> ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'}\n` +
-        `✅ <b>RSI (7):</b> ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'}\n` +
-        `✅ <b>Parabolic SAR:</b> ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `✅ <b>CMF (20):</b> ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'}\n` +
-        `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `✅ <b>Fiyat &gt; Açılış:</b> ${a.fiyat.toFixed(2)} &gt; ${a.acilis.toFixed(2)}\n` +
-        `✅ <b>Stokastik:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
-        `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `✅ <b>Pivot:</b> ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
-        `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
-
-      await sendTelegram(msg)
-      console.log(`✅ SİNYAL GÖNDERİLDİ: ${a.sembol}`)
+    // Eğer bugünün barı için zaten sinyal gönderildiyse pas geç
+    if (durum[sembol].lastSignalBarTime === bugun) {
+      return
     }
+
+    // Sinyal gününü güncelle ve dosyaya kaydet
+    durum[sembol].lastSignalBarTime = bugun
+    durumKaydet()
+
+    const dijitKutulari = '🟩'.repeat(9)
+
+    const msg = 
+      `🚀 <b>STRATEJİ SİNYALİ VERDİ: ${a.sembol}</b>\n\n` +
+      `📊 <b>SKOR :</b> [${dijitKutulari}] <b>9 / 9</b>\n` +
+      `💰 <b>Fiyat:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `✅ <b>RSI (14):</b> ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'}\n` +
+      `✅ <b>RSI (7):</b> ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'}\n` +
+      `✅ <b>Parabolic SAR:</b> ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+      `✅ <b>CMF (20):</b> ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'}\n` +
+      `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+      `✅ <b>Fiyat &gt; Açılış:</b> ${a.fiyat.toFixed(2)} &gt; ${a.acilis.toFixed(2)}\n` +
+      `✅ <b>Stokastik:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
+      `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+      `✅ <b>Pivot:</b> ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
+
+    await sendTelegram(msg)
+    console.log(`✅ SİNYAL GÖNDERİLDİ: ${a.sembol}`)
   }
 }
+
+async function kontrolEt() {
+  for (const sembol of HISSELER) {
+    await sinyalKontrol(sembol)
+  }
+}
+
 // ── Express Sunucu ve Webhook Rotası ─────────────────────────────────────────
 
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
@@ -433,7 +462,6 @@ app.post('/webhook', async (req, res) => {
       let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
-      // 1. Tümü İçin Test Raporu Komutu (/test veya test)
       if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
         await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor.`, chatId)
         
@@ -445,7 +473,6 @@ app.post('/webhook', async (req, res) => {
 
           const kart = raporKartiOlustur(a)
 
-          // Telegram 4096 karakter sınırını aşmamak için kontrol
           if ((mesajParcasi + kart).length > 3800) {
             await sendTelegram(mesajParcasi, chatId)
             mesajParcasi = `🔍 <b>TEST RAPORU (Devam)</b>\n\n` + kart
@@ -458,12 +485,9 @@ app.post('/webhook', async (req, res) => {
           await sendTelegram(mesajParcasi, chatId)
         }
       } 
-      // 2. Özel Hisse Sorgulama (Örn: THYAO, /hisse garan veya SASA)
       else {
-        // Komut temizleme (/hisse sas.is -> SAS.IS)
         let sembol = gelenMetin.replace('/HISSE', '').trim()
         
-        // Komut boş değilse ve /start vb. genel komutlar değilse hisse kabul et
         if (sembol.length > 0 && !sembol.startsWith('/')) {
           if (!sembol.endsWith('.IS')) {
             sembol = `${sembol}.IS`
