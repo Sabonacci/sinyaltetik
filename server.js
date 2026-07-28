@@ -15,6 +15,20 @@ const HISSELER = [
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
 ]
 
+// Dünya ve Uzak Doğu Endeks Sembolleri
+const ENDEKSLER = [
+  { kod: '^XU100', ad: '🇹🇷 BIST 100' },
+  { kod: '^N225',  ad: '🇯🇵 Nikkei 225 (Japonya)' },
+  { kod: '^HSI',   ad: '🇭🇰 Hang Seng (Hong Kong)' },
+  { kod: '000001.SS', ad: '🇨🇳 Shanghai Comp. (Çin)' },
+  { kod: '^KS11',  ad: '🇰🇷 KOSPI (G. Kore)' },
+  { kod: '^GSPC',  ad: '🇺🇸 S&P 500' },
+  { kod: '^IXIC',  ad: '🇺🇸 Nasdaq' },
+  { kod: '^DJI',   ad: '🇺🇸 Dow Jones' },
+  { kod: '^GDAXI', ad: '🇩🇪 DAX (Almanya)' },
+  { kod: '^FTSE',  ad: '🇬🇧 FTSE 100 (İngiltere)' }
+]
+
 const DOSYA = '/tmp/islemler.json'
 const DURUM_DOSYASI = '/tmp/durum.json'
 
@@ -262,7 +276,7 @@ function ichimokuBaseLine(highs, lows, period = 26) {
   return baseLine
 }
 
-// ── Veri Çekme Fonksiyonu ───────────────────────────────────────────────────
+// ── Veri Çekme Fonksiyonları ───────────────────────────────────────────────
 
 async function fetchYahooDaily(symbol) {
   try {
@@ -286,6 +300,33 @@ async function fetchYahooDaily(symbol) {
     }
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
+    return null
+  }
+}
+
+// Endeks Değerlerini Çekme Fonksiyonu
+async function endeksVerisiGetir(item) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${item.kod}?interval=1d&range=5d`
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 })
+    const result = res.data?.chart?.result?.[0]
+    if (!result) return null
+
+    const meta = result.meta
+    const sonFiyat = meta.regularMarketPrice
+    const oncekiKapanis = meta.chartPreviousClose || meta.previousClose
+    
+    const degisim = sonFiyat - oncekiKapanis
+    const yuzdeDegisim = (degisim / oncekiKapanis) * 100
+
+    return {
+      ad: item.ad,
+      fiyat: sonFiyat,
+      degisim: degisim,
+      yuzde: yuzdeDegisim
+    }
+  } catch (e) {
+    console.error(`${item.ad} verisi alınamadı:`, e.message)
     return null
   }
 }
@@ -355,7 +396,7 @@ async function hisseAnaliziGetir(sembol) {
   }
 }
 
-// ── Panel Tarzı Rapor Kartı Oluşturucu ────────────────────────────────────────
+// ── Rapor Kartı Oluşturucu ───────────────────────────────────────────────────
 
 function raporKartiOlustur(a) {
   const kriterler = [
@@ -467,7 +508,31 @@ app.post('/webhook', async (req, res) => {
       let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
-      if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
+      // 1. ENDEKS RAPORU KOMUTU (/endeks veya endeks)
+      if (gelenMetin === 'ENDEKS' || gelenMetin === '/ENDEKS') {
+        await sendTelegram(`⏳ <b>Küresel Piyasa Endeksleri Çekiliyor...</b>`, chatId)
+
+        const sozler = ENDEKSLER.map(item => endeksVerisiGetir(item))
+        const sonuclar = await Promise.all(sozler)
+
+        let msg = `🌍 <b>DÜNYA & UZAK DOĞU ENDEKSLERİ</b>\n`
+        msg += `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n`
+        msg += `━━━━━━━━━━━━━━━━━━━━\n\n`
+
+        sonuclar.forEach(e => {
+          if (e) {
+            const yon = e.yuzde >= 0 ? '🟢' : '🔴'
+            const isaret = e.yuzde >= 0 ? '+' : ''
+            msg += `${e.ad}\n`
+            msg += `💰 <b>${e.fiyat.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</b> | ${yon} <code>${isaret}${e.yuzde.toFixed(2)}%</code>\n\n`
+          }
+        })
+
+        msg += `━━━━━━━━━━━━━━━━━━━━`
+        await sendTelegram(msg, chatId)
+      }
+      // 2. TEST RAPORU KOMUTU (/test veya test)
+      else if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
         await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor (Filtre: Min. 8/9 Skor).`, chatId)
 
         const analizSozleri = HISSELER.map(sembol => hisseAnaliziGetir(sembol))
@@ -501,6 +566,7 @@ app.post('/webhook', async (req, res) => {
           await sendTelegram(mesajParcasi, chatId)
         }
       } 
+      // 3. ÖZEL HİSSE SORGULAMA
       else {
         let sembol = gelenMetin.replace('/HISSE', '').trim()
         
@@ -527,13 +593,11 @@ app.post('/webhook', async (req, res) => {
   }
 })
 
-// Render uyumlu Dinamik Port Ataması
 const PORT = process.env.PORT || 3000
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda başarıyla başladı ✅`)
   
-  // İlk taramayı güvenli olarak çalıştır
   kontrolEt().catch(err => console.error('Başlangıç tarama hatası:', err.message))
   setInterval(kontrolEt, 60 * 1000)
 })
