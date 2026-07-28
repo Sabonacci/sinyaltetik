@@ -11,7 +11,7 @@ const TELEGRAM_CHAT_ID = '5756145019'
 
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
-  'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
+  'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS', 'TRENJ.IS', 'TRALT.IS'
 ]
 
 const DOSYA = '/tmp/islemler.json'
