@@ -282,26 +282,29 @@ async function fetchYahooDaily(symbol) {
 
 async function tekEndeksGetir(e) {
   try {
-    // v7/finance/quote artık crumb/cookie kimlik doğrulaması istiyor (401 hatası veriyor).
-    // Bunun yerine hisse analizinde de kullandığımız, kimlik doğrulaması gerektirmeyen
-    // v8/finance/chart endpoint'ini kullanıyoruz ve meta alanından hesaplıyoruz.
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(e.sembol)}?interval=1d&range=5d`
     const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
     const result = res.data?.chart?.result?.[0]
     const meta = result?.meta
+    const quotes = result?.indicators?.quote?.[0]?.close?.filter(x => x != null)
 
-    if (!meta || meta.regularMarketPrice == null) {
+    if (!meta || !quotes || quotes.length < 2) {
       return { ...e, hata: true }
     }
 
-    const fiyat = meta.regularMarketPrice
-    const oncekiKapanis = meta.previousClose ?? meta.chartPreviousClose
-    const degisim = (oncekiKapanis != null) ? fiyat - oncekiKapanis : null
-    const degisimYuzde = (oncekiKapanis) ? (degisim / oncekiKapanis) * 100 : null
+    // Anlık Fiyat (Meta'da varsa anlık piyasa fiyatı, yoksa son mumun fiyatı)
+    const fiyat = meta.regularMarketPrice ?? quotes[quotes.length - 1]
+    
+    // Bir önceki günün gerçek kapanış fiyatı (Chart dizisinden sondan 2. eleman)
+    // Eğer seans içi canlı veri geliyorsa meta.chartPreviousClose kullanılır
+    const oncekiKapanis = meta.chartPreviousClose ?? quotes[quotes.length - 2]
+
+    const degisim = fiyat - oncekiKapanis
+    const degisimYuzde = (degisim / oncekiKapanis) * 100
 
     return {
       ...e,
-      hata: degisimYuzde == null,
+      hata: false,
       fiyat,
       degisim,
       degisimYuzde,
