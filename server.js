@@ -268,8 +268,12 @@ function ichimokuBaseLine(highs, lows, period = 26) {
 
 async function fetchYahooDaily(symbol) {
   try {
-    // yahoo-finance2 çerez ve IP engellerini otomatik yönetir
-    const result = await yahooFinance.chart(symbol, { period1: '1y', interval: '1d' })
+    // 1 yıl öncesinin tarihini hesapla (YYYY-MM-DD)
+    const birYilOnce = new Date()
+    birYilOnce.setFullYear(birYilOnce.getFullYear() - 1)
+    const period1Date = birYilOnce.toISOString().split('T')[0]
+
+    const result = await yahooFinance.chart(symbol, { period1: period1Date, interval: '1d' })
     if (!result || !result.quotes || result.quotes.length === 0) return null
 
     const raw = result.quotes.filter(x => 
