@@ -1,6 +1,8 @@
 const axios   = require('axios')
 const express = require('express')
 const fs      = require('fs')
+const yahooFinance = require('yahoo-finance2').default
+
 const app     = express()
 
 // Telegram'dan gelen Webhook isteklerini (JSON) okuyabilmek için şarttır
@@ -11,8 +13,8 @@ const TELEGRAM_CHAT_ID = '5756145019'
 
 
 const HISSELER = [
-  'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS',
-  'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS',
+  'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS', 'TRALT.IS', 'KATMR.IS',
+  'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS', 'PATEK.IS', 'LIDER.IS',
 ]
 
 const DOSYA = '/tmp/islemler.json'
@@ -262,27 +264,24 @@ function ichimokuBaseLine(highs, lows, period = 26) {
   return baseLine
 }
 
-// ── Veri Çekme Fonksiyonu ───────────────────────────────────────────────────
+// ── Güncellenmiş Veri Çekme Fonksiyonu ──────────────────────────────────────
 
 async function fetchYahooDaily(symbol) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 })
-    const result = res.data?.chart?.result?.[0]
-    if (!result) return null
+    // yahoo-finance2 çerez ve IP engellerini otomatik yönetir
+    const result = await yahooFinance.chart(symbol, { period1: '1y', interval: '1d' })
+    if (!result || !result.quotes || result.quotes.length === 0) return null
 
-    const q = result.indicators.quote[0]
-    
-    const raw = q.close.map((c, i) => ({
-      c: c, o: q.open[i], h: q.high[i], l: q.low[i], v: q.volume[i]
-    })).filter(x => x.c != null && x.o != null && x.h != null && x.l != null && x.v != null)
+    const raw = result.quotes.filter(x => 
+      x.close != null && x.open != null && x.high != null && x.low != null && x.volume != null
+    )
 
     return {
-      closes: raw.map(x => parseFloat(x.c.toFixed(4))),
-      opens:  raw.map(x => parseFloat(x.o.toFixed(4))),
-      highs:  raw.map(x => parseFloat(x.h.toFixed(4))),
-      lows:   raw.map(x => parseFloat(x.l.toFixed(4))),
-      vols:   raw.map(x => parseFloat(x.v))
+      closes: raw.map(x => parseFloat(x.close.toFixed(4))),
+      opens:  raw.map(x => parseFloat(x.open.toFixed(4))),
+      highs:  raw.map(x => parseFloat(x.high.toFixed(4))),
+      lows:   raw.map(x => parseFloat(x.low.toFixed(4))),
+      vols:   raw.map(x => parseFloat(x.volume))
     }
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
