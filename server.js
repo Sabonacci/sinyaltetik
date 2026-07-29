@@ -1,8 +1,8 @@
 const axios   = require('axios')
 const express = require('express')
 const fs      = require('fs')
-const yahooFinance = require('yahoo-finance2').default
-
+const { YahooFinance } = require('yahoo-finance2')
+const yahooFinance = new YahooFinance()
 const app     = express()
 
 // Telegram'dan gelen Webhook isteklerini (JSON) okuyabilmek için şarttır
