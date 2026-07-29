@@ -278,26 +278,55 @@ async function fetchYahooDaily(symbol) {
   }
 }
 
-// ── Endeks Verisi Çekme Fonksiyonu (/endeks komutu için) ────────────────────
+// ── Garantili Endeks Verisi Çekme Fonksiyonu ──────────────────────────────────
 
 async function tekEndeksGetir(e) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(e.sembol)}?interval=1d&range=5d`
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    // 1 aya kadar veri çekip gün kapanışlarını net yakalıyoruz
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(e.sembol)}?interval=1d&range=1mo`
+    const res = await axios.get(url, { 
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+      } 
+    })
+    
     const result = res.data?.chart?.result?.[0]
     const meta = result?.meta
-    const quotes = result?.indicators?.quote?.[0]?.close?.filter(x => x != null)
+    const quotes = result?.indicators?.quote?.[0]?.close
+    const timestamps = result?.timestamp
 
     if (!meta || !quotes || quotes.length < 2) {
       return { ...e, hata: true }
     }
 
-    // Anlık Fiyat (Meta'da varsa anlık piyasa fiyatı, yoksa son mumun fiyatı)
-    const fiyat = meta.regularMarketPrice ?? quotes[quotes.length - 1]
-    
-    // Bir önceki günün gerçek kapanış fiyatı (Chart dizisinden sondan 2. eleman)
-    // Eğer seans içi canlı veri geliyorsa meta.chartPreviousClose kullanılır
-    const oncekiKapanis = meta.chartPreviousClose ?? quotes[quotes.length - 2]
+    // null/undefined olmayan ve mantıklı fiyat içeren mumları süz
+    const validData = []
+    for (let i = 0; i < quotes.length; i++) {
+      if (quotes[i] !== null && quotes[i] !== undefined && !isNaN(quotes[i])) {
+        validData.push({
+          time: timestamps ? timestamps[i] : i,
+          close: quotes[i]
+        })
+      }
+    }
+
+    if (validData.length < 2) return { ...e, hata: true }
+
+    // Anlık Fiyat (Seans açıksa meta.regularMarketPrice, kapalıysa son geçerli kapanış)
+    const sonMum = validData[validData.length - 1]
+    const birÖncekiMum = validData[validData.length - 2]
+
+    let fiyat = meta.regularMarketPrice
+    let oncekiKapanis = meta.chartPreviousClose || meta.previousClose
+
+    // Eğer meta'daki fiyatlar eksikse/hatalıysa direkt grafik dizisinden al
+    if (!fiyat || isNaN(fiyat)) {
+      fiyat = sonMum.close
+    }
+
+    if (!oncekiKapanis || isNaN(oncekiKapanis) || oncekiKapanis === fiyat) {
+      oncekiKapanis = birÖncekiMum.close
+    }
 
     const degisim = fiyat - oncekiKapanis
     const degisimYuzde = (degisim / oncekiKapanis) * 100
@@ -308,14 +337,13 @@ async function tekEndeksGetir(e) {
       fiyat,
       degisim,
       degisimYuzde,
-      piyasaDurumu: meta.marketState || 'UNKNOWN' // PRE, REGULAR, POST, CLOSED
+      piyasaDurumu: meta.marketState || 'UNKNOWN'
     }
   } catch (err) {
     console.error(`${e.sembol} endeks veri hatası:`, err.message)
     return { ...e, hata: true }
   }
 }
-
 async function endeksVerileriGetir() {
   try {
     const sonuclar = await Promise.all(ENDEKSLER.map(e => tekEndeksGetir(e)))
