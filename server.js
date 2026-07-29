@@ -7,7 +7,7 @@ const app     = express()
 app.use(express.json())
 
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
-const TELEGRAM_CHAT_ID = '5756145019
+const TELEGRAM_CHAT_ID = '5756145019'
 
 // Takip edilecek sabit hisseler (Otomatik sinyal motoru için)
 const HISSELER = [
