@@ -282,54 +282,54 @@ async function fetchYahooDaily(symbol) {
 
 async function tekEndeksGetir(e) {
   try {
-    // 1 aya kadar veri çekip gün kapanışlarını net yakalıyoruz
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(e.sembol)}?interval=1d&range=1mo`
+    // includePrePost=true ve includeAdjustedClose=true ile Yahoo'nun iç hesaplamasını çekiyoruz
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(e.sembol)}?interval=1d&range=5d&includePrePost=true&includeAdjustedClose=true`
+    
     const res = await axios.get(url, { 
       headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
-      } 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5'
+      },
+      timeout: 5000
     })
-    
+
     const result = res.data?.chart?.result?.[0]
     const meta = result?.meta
-    const quotes = result?.indicators?.quote?.[0]?.close
-    const timestamps = result?.timestamp
 
-    if (!meta || !quotes || quotes.length < 2) {
+    if (!meta) {
       return { ...e, hata: true }
     }
 
-    // null/undefined olmayan ve mantıklı fiyat içeren mumları süz
-    const validData = []
-    for (let i = 0; i < quotes.length; i++) {
-      if (quotes[i] !== null && quotes[i] !== undefined && !isNaN(quotes[i])) {
-        validData.push({
-          time: timestamps ? timestamps[i] : i,
-          close: quotes[i]
-        })
-      }
-    }
-
-    if (validData.length < 2) return { ...e, hata: true }
-
-    // Anlık Fiyat (Seans açıksa meta.regularMarketPrice, kapalıysa son geçerli kapanış)
-    const sonMum = validData[validData.length - 1]
-    const birÖncekiMum = validData[validData.length - 2]
-
+    // 1. Fiyat Belirleme: Anlık Piyasa Fiyatı -> Yoksa Kapanış Fiyatı
     let fiyat = meta.regularMarketPrice
-    let oncekiKapanis = meta.chartPreviousClose || meta.previousClose
 
-    // Eğer meta'daki fiyatlar eksikse/hatalıysa direkt grafik dizisinden al
-    if (!fiyat || isNaN(fiyat)) {
-      fiyat = sonMum.close
+    // 2. Önceki Kapanış Belirleme: Yahoo'nun Kendi Referans Kapanış Fiyatları
+    let oncekiKapanis = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPreviousClose
+
+    // Eğer meta verileri eksikse indicators dizisine güvenli yedekleme yap
+    const closes = result?.indicators?.quote?.[0]?.close?.filter(x => x !== null && x !== undefined && x > 0)
+    
+    if ((!fiyat || isNaN(fiyat)) && closes && closes.length > 0) {
+      fiyat = closes[closes.length - 1]
     }
 
-    if (!oncekiKapanis || isNaN(oncekiKapanis) || oncekiKapanis === fiyat) {
-      oncekiKapanis = birÖncekiMum.close
+    if ((!oncekiKapanis || isNaN(oncekiKapanis) || oncekiKapanis === fiyat) && closes && closes.length > 1) {
+      oncekiKapanis = closes[closes.length - 2]
+    }
+
+    // Hâlâ fiyat veya önceki kapanış alınamadıysa ya da mantıksızsa hata dön
+    if (!fiyat || !oncekiKapanis || oncekiKapanis <= 0) {
+      return { ...e, hata: true }
     }
 
     const degisim = fiyat - oncekiKapanis
     const degisimYuzde = (degisim / oncekiKapanis) * 100
+
+    // Aşırı uçuk saçma yüzdeleri (Örn: %100'den büyük veya %-80'den küçük sıçramalar - veri hatasıdır) filtrele
+    if (Math.abs(degisimYuzde) > 50) {
+      return { ...e, hata: true }
+    }
 
     return {
       ...e,
@@ -337,14 +337,13 @@ async function tekEndeksGetir(e) {
       fiyat,
       degisim,
       degisimYuzde,
-      piyasaDurumu: meta.marketState || 'UNKNOWN'
+      piyasaDurumu: meta.marketState || 'CLOSED'
     }
   } catch (err) {
     console.error(`${e.sembol} endeks veri hatası:`, err.message)
     return { ...e, hata: true }
   }
-}
-async function endeksVerileriGetir() {
+}async function endeksVerileriGetir() {
   try {
     const sonuclar = await Promise.all(ENDEKSLER.map(e => tekEndeksGetir(e)))
     return sonuclar
