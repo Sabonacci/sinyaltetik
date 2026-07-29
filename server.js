@@ -280,27 +280,43 @@ async function fetchYahooDaily(symbol) {
 
 // ── Endeks Verisi Çekme Fonksiyonu (/endeks komutu için) ────────────────────
 
+async function tekEndeksGetir(e) {
+  try {
+    // v7/finance/quote artık crumb/cookie kimlik doğrulaması istiyor (401 hatası veriyor).
+    // Bunun yerine hisse analizinde de kullandığımız, kimlik doğrulaması gerektirmeyen
+    // v8/finance/chart endpoint'ini kullanıyoruz ve meta alanından hesaplıyoruz.
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(e.sembol)}?interval=1d&range=5d`
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const result = res.data?.chart?.result?.[0]
+    const meta = result?.meta
+
+    if (!meta || meta.regularMarketPrice == null) {
+      return { ...e, hata: true }
+    }
+
+    const fiyat = meta.regularMarketPrice
+    const oncekiKapanis = meta.previousClose ?? meta.chartPreviousClose
+    const degisim = (oncekiKapanis != null) ? fiyat - oncekiKapanis : null
+    const degisimYuzde = (oncekiKapanis) ? (degisim / oncekiKapanis) * 100 : null
+
+    return {
+      ...e,
+      hata: degisimYuzde == null,
+      fiyat,
+      degisim,
+      degisimYuzde,
+      piyasaDurumu: meta.marketState || 'UNKNOWN' // PRE, REGULAR, POST, CLOSED
+    }
+  } catch (err) {
+    console.error(`${e.sembol} endeks veri hatası:`, err.message)
+    return { ...e, hata: true }
+  }
+}
+
 async function endeksVerileriGetir() {
   try {
-    const semboller = ENDEKSLER.map(e => e.sembol).join(',')
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(semboller)}`
-    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-    const sonuclar = res.data?.quoteResponse?.result || []
-
-    return ENDEKSLER.map(e => {
-      const q = sonuclar.find(r => r.symbol === e.sembol)
-      if (!q || q.regularMarketPrice == null) {
-        return { ...e, hata: true }
-      }
-      return {
-        ...e,
-        hata: false,
-        fiyat: q.regularMarketPrice,
-        degisim: q.regularMarketChange,
-        degisimYuzde: q.regularMarketChangePercent,
-        piyasaDurumu: q.marketState || 'UNKNOWN' // PRE, REGULAR, POST, CLOSED
-      }
-    })
+    const sonuclar = await Promise.all(ENDEKSLER.map(e => tekEndeksGetir(e)))
+    return sonuclar
   } catch (err) {
     console.error('Endeks veri hatası:', err.message)
     return null
