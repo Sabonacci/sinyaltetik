@@ -1,8 +1,6 @@
 const axios   = require('axios')
 const express = require('express')
 const fs      = require('fs')
-const yahooFinance = require('yahoo-finance2').default;
-
 const app     = express()
 
 // Telegram'dan gelen Webhook isteklerini (JSON) okuyabilmek için şarttır
@@ -11,14 +9,13 @@ app.use(express.json())
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
 const TELEGRAM_CHAT_ID = '5756145019'
 
-
+// Takip edilecek sabit hisseler (Otomatik sinyal motoru için)
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS', 'TRALT.IS', 'KATMR.IS',
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS', 'PATEK.IS', 'LIDER.IS',
 ]
 
 const DOSYA = '/tmp/islemler.json'
-const DURUM_DOSYASI = '/tmp/durum.json'
 
 function islemleriYukle() {
   try {
@@ -31,32 +28,11 @@ function islemleriKaydet() {
   try { fs.writeFileSync(DOSYA, JSON.stringify(gunlukIslemler)) } catch(e) {}
 }
 
-// ── Sinyal Durumu Kaydetme ve Yükleme ───────────────────────────────────────
-
-function durumYukle() {
-  try {
-    if (fs.existsSync(DURUM_DOSYASI)) {
-      return JSON.parse(fs.readFileSync(DURUM_DOSYASI, 'utf8'))
-    }
-  } catch(e) {
-    console.error('Durum yükleme hatası:', e.message)
-  }
-  return {}
-}
-
-function durumKaydet() {
-  try {
-    fs.writeFileSync(DURUM_DOSYASI, JSON.stringify(durum))
-  } catch(e) {
-    console.error('Durum kaydetme hatası:', e.message)
-  }
-}
-
 var gunlukIslemler = islemleriYukle()
-const durum = durumYukle()
 
+const durum = {}
 HISSELER.forEach(h => {
-  if (!durum[h]) durum[h] = { lastSignalBarTime: null }
+  durum[h] = { lastSignalTime: 0 }
 })
 
 // ── İndikatör Hesaplama Fonksiyonları ───────────────────────────────────────
@@ -264,28 +240,25 @@ function ichimokuBaseLine(highs, lows, period = 26) {
   return baseLine
 }
 
-// ── Güncellenmiş Veri Çekme Fonksiyonu ──────────────────────────────────────
+// ── Veri Çekme Fonksiyonu ───────────────────────────────────────────────────
 
 async function fetchYahooDaily(symbol) {
   try {
-    // 1 yıl öncesinin tarihini hesapla (YYYY-MM-DD)
-    const birYilOnce = new Date()
-    birYilOnce.setFullYear(birYilOnce.getFullYear() - 1)
-    const period1Date = birYilOnce.toISOString().split('T')[0]
-
-    const result = await yahooFinance.chart(symbol, { period1: period1Date, interval: '1d' })
-    if (!result || !result.quotes || result.quotes.length === 0) return null
-
-    const raw = result.quotes.filter(x => 
-      x.close != null && x.open != null && x.high != null && x.low != null && x.volume != null
-    )
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const result = res.data.chart.result[0]
+    const q = result.indicators.quote[0]
+    
+    const raw = q.close.map((c, i) => ({
+      c: c, o: q.open[i], h: q.high[i], l: q.low[i], v: q.volume[i]
+    })).filter(x => x.c != null && x.o != null && x.h != null && x.l != null && x.v != null)
 
     return {
-      closes: raw.map(x => parseFloat(x.close.toFixed(4))),
-      opens:  raw.map(x => parseFloat(x.open.toFixed(4))),
-      highs:  raw.map(x => parseFloat(x.high.toFixed(4))),
-      lows:   raw.map(x => parseFloat(x.low.toFixed(4))),
-      vols:   raw.map(x => parseFloat(x.volume))
+      closes: raw.map(x => parseFloat(x.c.toFixed(4))),
+      opens:  raw.map(x => parseFloat(x.o.toFixed(4))),
+      highs:  raw.map(x => parseFloat(x.h.toFixed(4))),
+      lows:   raw.map(x => parseFloat(x.l.toFixed(4))),
+      vols:   raw.map(x => parseFloat(x.v))
     }
   } catch (err) {
     console.error(`${symbol} veri hatası: ${err.message}`)
@@ -358,103 +331,66 @@ async function hisseAnaliziGetir(sembol) {
   }
 }
 
-// ── Panel Tarzı Rapor Kartı Oluşturucu ────────────────────────────────────────
-
+// Tek bir hissenin rapor kartını string formatında oluşturan yardımcı fonksiyon
 function raporKartiOlustur(a) {
-  const kriterler = [
-    { no: 1, ad: 'RSI (14)', val: `${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'} (45-65)`, ok: a.rsi14.ok },
-    { no: 2, ad: 'RSI (7)', val: `${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'} (&lt;=70)`, ok: a.rsi7.ok },
-    { no: 3, ad: 'Parabolic SAR', val: `${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)`, ok: a.sar.ok },
-    { no: 4, ad: 'CMF (20)', val: `${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'} (0.01-0.30)`, ok: a.cmf20.ok },
-    { no: 5, ad: 'Hull MA (9)', val: `${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)`, ok: a.hma9.ok },
-    { no: 6, ad: 'Fiyat/Açılış', val: `${a.fiyat.toFixed(2)} &gt; ${a.acilis.toFixed(2)}`, ok: a.fiyatAcilis.ok },
-    { no: 7, ad: 'Stokastik K/D', val: `K:${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'} / D:${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'}`, ok: a.stochRsi.ok },
-    { no: 8, ad: 'Base Line', val: `${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)`, ok: a.baseLine.ok },
-    { no: 9, ad: 'Pivot Noktası', val: `${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)`, ok: a.pivot.ok }
-  ]
-
-  const basariliSayi = kriterler.filter(k => k.ok).length
-  const yuzde = Math.round((basariliSayi / 9) * 100)
-
-  const dijitKutulari = '🟩'.repeat(basariliSayi) + '🟥'.repeat(9 - basariliSayi)
-
-  const toplamBar = 10
-  const doluBar = Math.round((basariliSayi / 9) * toplamBar)
-  const ilerlemeBari = '█'.repeat(doluBar) + '░'.repeat(toplamBar - doluBar)
-
-  let r = `🎛️ <b>PANEL ANALİZİ: ${a.sembol}</b>\n`
+  let r = `📌 <b>${a.sembol}</b> — Fiyat: ${a.fiyat.toFixed(2)} ₺ | Açılış: ${a.acilis.toFixed(2)} ₺\n`
+  r += `${a.rsi14.ok ? '🟢' : '🔴'} RSI(14): ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'} (45-65)\n`
+  r += `${a.rsi7.ok ? '🟢' : '🔴'} RSI(7): ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'} (&lt;=70)\n`
+  r += `${a.sar.ok ? '🟢' : '🔴'} SAR: ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `${a.cmf20.ok ? '🟢' : '🔴'} CMF(20): ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'} (0.01 - 0.30)\n`
+  r += `${a.hma9.ok ? '🟢' : '🔴'} Hull MA(9): ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `${a.fiyatAcilis.ok ? '🟢' : '🔴'} Fiyat &gt; Açılış\n`
+  r += `${a.stochRsi.ok ? '🟢' : '🔴'} Stokastik: K(${a.stochRsi.kSon !== null ? a.stochRsi.kSon.toFixed(1) : '-'}) / D(${a.stochRsi.dSon !== null ? a.stochRsi.dSon.toFixed(1) : '-'})\n`
+  r += `${a.baseLine.ok ? '🟢' : '🔴'} Base Line: ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `${a.pivot.ok ? '🟢' : '🔴'} Pivot: ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n`
+  r += `STATUS: ${a.hepsiTamam ? '🚀 AL SİNYALİ AKTİF' : '⏳ ŞARTLAR TAMAMLANMADI'}\n`
   r += `━━━━━━━━━━━━━━━━━━━━\n`
-  r += `📊 <b>SKOR :</b> [${dijitKutulari}] <b>${basariliSayi} / 9</b>\n`
-  r += `📈 <b>BARS :</b> <code>[${ilerlemeBari}] %${yuzde}</code>\n`
-  r += `💰 <b>FİYAT:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n`
-  r += `━━━━━━━━━━━━━━━━━━━━\n`
-
-  kriterler.forEach(k => {
-    const ikon = k.ok ? '🟢' : '🔴'
-    r += `[${k.no}] ${ikon} <b>${k.ad}:</b> <code>${k.val}</code>\n`
-  })
-
-  r += `━━━━━━━━━━━━━━━━━━━━\n`
-  
-  if (a.hepsiTamam) {
-    r += `STATUS: 🚀 <b>9/9 MÜKEMMEL AL SİNYALİ</b>\n`
-  } else {
-    r += `STATUS: ⏳ <b>${basariliSayi}/9 KOŞUL SAĞLANDI</b>\n`
-  }
-
   return r
 }
 
-// ── Sinyal Motoru ───────────────────────────────────────────────────────────
+// ── Sinyal Motoru ─────────────────────────────────────────────────────────────
 
 async function sinyalKontrol(sembol) {
-  try {
-    const a = await hisseAnaliziGetir(sembol)
-    if (!a) return
+  const a = await hisseAnaliziGetir(sembol)
+  if (!a) return
 
-    const bugun = new Date().toISOString().split('T')[0]
-
-    if (a.hepsiTamam) {
-      if (!durum[sembol]) durum[sembol] = { lastSignalBarTime: null }
-      
-      if (durum[sembol].lastSignalBarTime === bugun) {
-        return
-      }
-
-      durum[sembol].lastSignalBarTime = bugun
-      durumKaydet()
-
-      const dijitKutulari = '🟩'.repeat(9)
+  if (a.hepsiTamam) {
+    const simdi = Date.now()
+    if (!durum[sembol]) durum[sembol] = { lastSignalTime: 0 }
+    
+    if (simdi - durum[sembol].lastSignalTime > 60 * 60 * 1000) {
+      durum[sembol].lastSignalTime = simdi
 
       const msg = 
         `🚀 <b>STRATEJİ SİNYALİ VERDİ: ${a.sembol}</b>\n\n` +
-        `📊 <b>SKOR :</b> [${dijitKutulari}] <b>9 / 9</b>\n` +
-        `💰 <b>Fiyat:</b> <b>${a.fiyat.toFixed(2)} ₺</b> (Açılış: ${a.acilis.toFixed(2)} ₺)\n` +
+        `💰 <b>Fiyat:</b> ${a.fiyat.toFixed(2)} ₺ (Açılış: ${a.acilis.toFixed(2)})\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `✅ <b>RSI (14):</b> ${a.rsi14.val ? a.rsi14.val.toFixed(1) : '-'}\n` +
-        `✅ <b>RSI (7):</b> ${a.rsi7.val ? a.rsi7.val.toFixed(1) : '-'}\n` +
-        `✅ <b>Parabolic SAR:</b> ${a.sar.val ? a.sar.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `✅ <b>CMF (20):</b> ${a.cmf20.val ? a.cmf20.val.toFixed(3) : '-'}\n` +
-        `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `✅ <b>Fiyat &gt; Açılış:</b> ${a.fiyat.toFixed(2)} &gt; ${a.acilis.toFixed(2)}\n` +
+        `✅ <b>RSI (14):</b> ${a.rsi14.val.toFixed(1)}\n` +
+        `✅ <b>RSI (7):</b> ${a.rsi7.val.toFixed(1)}\n` +
+        `✅ <b>Parabolic SAR:</b> ${a.sar.val.toFixed(2)} (&lt; Fiyat)\n` +
+        `✅ <b>CMF (20):</b> ${a.cmf20.val.toFixed(3)}\n` +
+        `✅ <b>Hull MA (9):</b> ${a.hma9.val !== null && a.hma9.val !== undefined ? a.hma9.val.toFixed(2) : '-'}\n` +
         `✅ <b>Stokastik:</b> K (${a.stochRsi.kSon ? a.stochRsi.kSon.toFixed(1) : '-'}) ▲ D (${a.stochRsi.dSon ? a.stochRsi.dSon.toFixed(1) : '-'})\n` +
-        `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val ? a.baseLine.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
-        `✅ <b>Pivot:</b> ${a.pivot.val ? a.pivot.val.toFixed(2) : '-'} (&lt; Fiyat)\n` +
+        `✅ <b>Ichimoku Base Line:</b> ${a.baseLine.val.toFixed(2)}\n` +
+        `✅ <b>Pivot:</b> ${a.pivot.val.toFixed(2)}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}`
 
       await sendTelegram(msg)
       console.log(`✅ SİNYAL GÖNDERİLDİ: ${a.sembol}`)
     }
-  } catch(e) {
-    console.error(`Sinyal kontrol hatası (${sembol}):`, e.message)
   }
 }
 
 async function kontrolEt() {
+  const saat = new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})
+  console.log(`[${saat}] Kontrol başladı...`)
+
   for (const sembol of HISSELER) {
     await sinyalKontrol(sembol)
   }
+
+  console.log(`[${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}] Kontrol bitti.`)
 }
 
 // ── Express Sunucu ve Webhook Rotası ─────────────────────────────────────────
@@ -462,36 +398,25 @@ async function kontrolEt() {
 app.get('/', (req, res) => res.send('Teknik Analiz Botu Çalışıyor ✅'))
 
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200)
-
   try {
     const message = req.body?.message
     if (message && message.text) {
       let gelenMetin = message.text.trim().toUpperCase()
       const chatId = message.chat.id
 
+      // 1. Tümü İçin Test Raporu Komutu (/test veya test)
       if (gelenMetin === 'TEST' || gelenMetin === '/TEST') {
-        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor (Filtre: Min. 8/9 Skor).`, chatId)
+        await sendTelegram(`⏳ <b>Sistem Taraması Başlatıldı...</b>\nTakipteki ${HISSELER.length} hisse analiz ediliyor.`, chatId)
+        
+        let mesajParcasi = `🔍 <b>TELEGRAM TEST RAPORU</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
 
-        const analizSozleri = HISSELER.map(sembol => hisseAnaliziGetir(sembol))
-        const sonuclar = await Promise.all(analizSozleri)
+        for (const sembol of HISSELER) {
+          const a = await hisseAnaliziGetir(sembol)
+          if (!a) continue
 
-        const filtrelenmis = sonuclar.filter(a => {
-          if (!a) return false
-          const k = [a.rsi14.ok, a.rsi7.ok, a.sar.ok, a.cmf20.ok, a.hma9.ok, a.fiyatAcilis.ok, a.stochRsi.ok, a.baseLine.ok, a.pivot.ok]
-          return k.filter(Boolean).length >= 8
-        })
-
-        if (filtrelenmis.length === 0) {
-          await sendTelegram(`🔍 <b>TEST RAPORU SONUCU</b>\n\n⚠️ Şu an takip listesindeki hiçbir hisse <b>8/9 veya 9/9</b> kriter şartını sağlamıyor.`, chatId)
-          return
-        }
-
-        let mesajParcasi = `🔍 <b>TEST RAPORU (Min. 8/9 Skor)</b>\n🎯 Eşleşen Hisse: <b>${filtrelenmis.length} adet</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n`
-
-        for (const a of filtrelenmis) {
           const kart = raporKartiOlustur(a)
 
+          // Telegram 4096 karakter sınırını aşmamak için kontrol
           if ((mesajParcasi + kart).length > 3800) {
             await sendTelegram(mesajParcasi, chatId)
             mesajParcasi = `🔍 <b>TEST RAPORU (Devam)</b>\n\n` + kart
@@ -504,9 +429,12 @@ app.post('/webhook', async (req, res) => {
           await sendTelegram(mesajParcasi, chatId)
         }
       } 
+      // 2. Özel Hisse Sorgulama (Örn: THYAO, /hisse garan veya SASA)
       else {
+        // Komut temizleme (/hisse sas.is -> SAS.IS)
         let sembol = gelenMetin.replace('/HISSE', '').trim()
         
+        // Komut boş değilse ve /start vb. genel komutlar değilse hisse kabul et
         if (sembol.length > 0 && !sembol.startsWith('/')) {
           if (!sembol.endsWith('.IS')) {
             sembol = `${sembol}.IS`
@@ -528,15 +456,12 @@ app.post('/webhook', async (req, res) => {
   } catch (err) {
     console.error('Webhook işleme hatası:', err.message)
   }
+
+  res.sendStatus(200)
 })
 
-// Render uyumlu Dinamik Port Ataması
-const PORT = process.env.PORT || 3000
-
-app.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda başarıyla başladı ✅`)
-  
-  // İlk taramayı güvenli olarak çalıştır
-  kontrolEt().catch(err => console.error('Başlangıç tarama hatası:', err.message))
+app.listen(3000, () => {
+  console.log('Sunucu başladı')
+  kontrolEt()
   setInterval(kontrolEt, 60 * 1000)
 })
