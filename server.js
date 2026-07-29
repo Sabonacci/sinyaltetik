@@ -7,12 +7,24 @@ const app     = express()
 app.use(express.json())
 
 const TELEGRAM_TOKEN   = '8557325295:AAEXgo3rxK7a1MTVE9QVbiExvrZmolct6Js'
-const TELEGRAM_CHAT_ID = '5756145019'
+const TELEGRAM_CHAT_ID = '5756145019
 
 // Takip edilecek sabit hisseler (Otomatik sinyal motoru için)
 const HISSELER = [
   'EREGL.IS', 'ARFYE.IS', 'ARDYZ.IS', 'ORCAY.IS', 'OBAMS.IS', 'CIMSA.IS', 'TRALT.IS', 'KATMR.IS',
   'THYAO.IS', 'ASELS.IS', 'SISE.IS', 'ENJSA.IS', 'GESAN.IS', 'TRMET.IS', 'PATEK.IS', 'LIDER.IS',
+]
+
+// Takip edilecek global/yerel endeksler (/endeks komutu için)
+const ENDEKSLER = [
+  { ad: 'XU100',          aciklama: 'BIST 100',    sembol: 'XU100.IS' },
+  { ad: 'XBANK',          aciklama: 'BIST Banka',  sembol: 'XBANK.IS' },
+  { ad: 'Nikkei 225',     aciklama: 'Japonya',     sembol: '^N225'    },
+  { ad: 'Shanghai Comp',  aciklama: 'Çin',         sembol: '000001.SS'},
+  { ad: 'KOSPI',          aciklama: 'Kore',        sembol: '^KS11'    },
+  { ad: 'S&P 500',        aciklama: 'Amerika',     sembol: '^GSPC'    },
+  { ad: 'FTSE 100',       aciklama: 'İngiltere',   sembol: '^FTSE'    },
+  { ad: 'DAX 40',         aciklama: 'Almanya',     sembol: '^GDAXI'   },
 ]
 
 const DOSYA = '/tmp/islemler.json'
@@ -266,6 +278,66 @@ async function fetchYahooDaily(symbol) {
   }
 }
 
+// ── Endeks Verisi Çekme Fonksiyonu (/endeks komutu için) ────────────────────
+
+async function endeksVerileriGetir() {
+  try {
+    const semboller = ENDEKSLER.map(e => e.sembol).join(',')
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(semboller)}`
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const sonuclar = res.data?.quoteResponse?.result || []
+
+    return ENDEKSLER.map(e => {
+      const q = sonuclar.find(r => r.symbol === e.sembol)
+      if (!q || q.regularMarketPrice == null) {
+        return { ...e, hata: true }
+      }
+      return {
+        ...e,
+        hata: false,
+        fiyat: q.regularMarketPrice,
+        degisim: q.regularMarketChange,
+        degisimYuzde: q.regularMarketChangePercent,
+        piyasaDurumu: q.marketState || 'UNKNOWN' // PRE, REGULAR, POST, CLOSED
+      }
+    })
+  } catch (err) {
+    console.error('Endeks veri hatası:', err.message)
+    return null
+  }
+}
+
+function endeksRaporuOlustur(veriler) {
+  let r = `🌍 <b>GLOBAL ENDEKSLER</b>\n`
+  r += `🕐 ${new Date().toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul' })}\n`
+  r += `━━━━━━━━━━━━━━━━━━━━\n`
+
+  veriler.forEach(e => {
+    if (e.hata) {
+      r += `⚠️ 🟡<b>${e.ad}</b> (${e.aciklama}): veri alınamadı\n`
+      return
+    }
+
+    const yukseldi = e.degisimYuzde >= 0
+    const yonIkon = yukseldi ? '🟢▲' : '🔴▼'
+    const durumIkon =
+      e.piyasaDurumu === 'REGULAR' ? '🟢' :
+      (e.piyasaDurumu === 'PRE' || e.piyasaDurumu === 'POST' || e.piyasaDurumu === 'PREPRE' || e.piyasaDurumu === 'POSTPOST') ? '🟠' :
+      '⚪'
+
+    const fiyatStr = e.fiyat.toLocaleString('tr-TR', { maximumFractionDigits: 2, minimumFractionDigits: 2 })
+    const yuzdeStr = `${e.degisimYuzde >= 0 ? '+' : ''}${e.degisimYuzde.toFixed(2)}%`
+
+    r += `${durumIkon} 🟡<b>${e.ad}</b> <i>(${e.aciklama})</i>\n`
+    r += `   💰 <code>${fiyatStr}</code>   ${yonIkon} <code>${yuzdeStr}</code>\n`
+  })
+
+  r += `━━━━━━━━━━━━━━━━━━━━\n`
+  r += `🟢 Seans Açık   🟠 Ön/Son Seans   ⚪ Kapalı`
+
+  return r
+}
+
 async function sendTelegram(msg, targetChatId = null) {
   try {
     const chatId = targetChatId || TELEGRAM_CHAT_ID
@@ -359,8 +431,8 @@ function raporKartiOlustur(a) {
   const doluBar = Math.round((basariliSayi / 9) * toplamBar)
   const ilerlemeBari = '█'.repeat(doluBar) + '░'.repeat(toplamBar - doluBar)
 
-  // Panel Başlığı ve Göstergeler
-  let r = `🎛️ <b>PANEL ANALİZİ: ${a.sembol}</b>\n`
+  // Panel Başlığı ve Göstergeler (hisse ismi 🟡 ile sarı vurgulu)
+  let r = `🎛️ <b>PANEL ANALİZİ: 🟡${a.sembol}</b>\n`
   r += `━━━━━━━━━━━━━━━━━━━━\n`
   r += `📊 <b>SKOR :</b> [${dijitKutulari}] <b>${basariliSayi} / 9</b>\n`
   r += `📈 <b>BARS :</b> <code>[${ilerlemeBari}] %${yuzde}</code>\n`
@@ -398,7 +470,7 @@ async function sinyalKontrol(sembol) {
       durum[sembol].lastSignalTime = simdi
 
       const msg = 
-        `🚀 <b>STRATEJİ SİNYALİ VERDİ: ${a.sembol}</b>\n\n` +
+        `🚀 <b>STRATEJİ SİNYALİ VERDİ: 🟡${a.sembol}</b>\n\n` +
         `💰 <b>Fiyat:</b> ${a.fiyat.toFixed(2)} ₺ (Açılış: ${a.acilis.toFixed(2)})\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `✅ <b>RSI (14):</b> ${a.rsi14.val.toFixed(1)}\n` +
@@ -464,8 +536,20 @@ app.post('/webhook', async (req, res) => {
         if (mesajParcasi.length > 0) {
           await sendTelegram(mesajParcasi, chatId)
         }
-      } 
-      // 2. Özel Hisse Sorgulama (Örn: THYAO, /hisse garan veya SASA)
+      }
+      // 2. Global Endeksler Komutu (/endeks veya endeks)
+      else if (gelenMetin === 'ENDEKS' || gelenMetin === '/ENDEKS') {
+        await sendTelegram(`⏳ <b>Endeks verileri çekiliyor...</b>`, chatId)
+
+        const veriler = await endeksVerileriGetir()
+
+        if (!veriler) {
+          await sendTelegram(`❌ <b>Hata:</b> Endeks verileri şu anda alınamadı. Lütfen tekrar deneyin.`, chatId)
+        } else {
+          await sendTelegram(endeksRaporuOlustur(veriler), chatId)
+        }
+      }
+      // 3. Özel Hisse Sorgulama (Örn: THYAO, /hisse garan veya SASA)
       else {
         // Komut temizleme (/hisse sas.is -> SAS.IS)
         let sembol = gelenMetin.replace('/HISSE', '').trim()
@@ -483,7 +567,7 @@ app.post('/webhook', async (req, res) => {
           if (!a) {
             await sendTelegram(`❌ <b>Hata:</b> <code>${sembol.replace('.IS', '')}</code> sembolü için veri bulunamadı veya yetersiz geçmiş veri var. Lütfen hisse kodunu kontrol edin.`, chatId)
           } else {
-            const mesaj = `🔍 <b>ÖZEL HİSSE ANALİZİ: ${a.sembol}</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n` + raporKartiOlustur(a)
+            const mesaj = `🔍 <b>ÖZEL HİSSE ANALİZİ: 🟡${a.sembol}</b>\n🕐 ${new Date().toLocaleTimeString('tr-TR', {timeZone: 'Europe/Istanbul'})}\n\n` + raporKartiOlustur(a)
             await sendTelegram(mesaj, chatId)
           }
         }
