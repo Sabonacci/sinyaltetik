@@ -3,8 +3,6 @@ const express = require('express')
 const fs      = require('fs')
 const { YahooFinance } = require('yahoo-finance2');
 const yahooFinance = new YahooFinance();
-  ? yahooFinanceModule.default 
-  : (yahooFinanceModule.YahooFinance ? new yahooFinanceModule.YahooFinance() : yahooFinanceModule)
 
 const app     = express()
 
