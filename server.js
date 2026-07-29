@@ -1,8 +1,8 @@
 const axios   = require('axios')
 const express = require('express')
 const fs      = require('fs')
-const yahooFinanceModule = require('yahoo-finance2')
-const yahooFinance = yahooFinanceModule.default 
+const { YahooFinance } = require('yahoo-finance2');
+const yahooFinance = new YahooFinance();
   ? yahooFinanceModule.default 
   : (yahooFinanceModule.YahooFinance ? new yahooFinanceModule.YahooFinance() : yahooFinanceModule)
 
